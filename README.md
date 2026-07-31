@@ -56,7 +56,7 @@ See `COMPATIBILITY.md` for the full compatibility assessment and regression chec
 
 ## Support
 
-Support development and access EasyModules releases through [Patreon](https://www.patreon.com/EasyModules).
+Support development and access EasyModules releases and report bugs through [Patreon](https://www.patreon.com/EasyModules).
 
 ## Credits and License
 
