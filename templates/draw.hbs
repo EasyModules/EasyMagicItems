@@ -1,0 +1,139 @@
+<div class="emi-overlay">
+  <section class="emi-stage">
+    {{#if isGM}}
+      <button type="button" class="emi-close" data-action="close" title="{{labels.close}}"><i class="fa-solid fa-xmark"></i></button>
+    {{/if}}
+
+    <header class="emi-header">
+      <div class="emi-header-title">
+        <div class="emi-kicker">{{labels.arcaneTreasure}}</div>
+        <h1>EasyMagicItems</h1>
+        <p>{{labels.poolSummary}}</p>
+      </div>
+      {{#if isGM}}
+        <button type="button" class="emi-recommended-master {{#if recommendedAll}}is-active{{else}}is-custom{{/if}}" data-action="toggle-recommended-all" aria-pressed="{{recommendedAll}}" title="{{labels.applyRecommendationsTitle}}">
+          <span class="emi-switch"><i></i></span>
+          <span><b>{{labels.recommendedItemPools}}</b><small>{{labels.applyEveryCharacter}}</small></span>
+        </button>
+      {{/if}}
+    </header>
+
+    <main class="emi-cards {{cardLayoutClass}}">
+      {{#each participants}}
+      <article class="emi-card {{#if revealed}}is-revealed{{/if}} {{#if revealing}}is-revealing{{/if}}" data-token-uuid="{{tokenUuid}}">
+        {{#if isGM}}
+          <div class="emi-pool-status {{#if recommendedPool}}is-recommended{{else}}is-custom{{/if}}">
+            <i class="fa-solid {{#if recommendedPool}}fa-wand-magic-sparkles{{else}}fa-sliders{{/if}}"></i>
+            {{#if recommendedPool}}{{@root.labels.recommendedPool}}{{else}}{{@root.labels.customPool}}{{/if}}
+          </div>
+        {{/if}}
+        {{#if canConfigure}}
+          <div class="emi-card-toolbar">
+            <button type="button" data-action="configure-player" data-token-uuid="{{tokenUuid}}" title="{{configureTitle}}"><i class="fa-solid fa-gear"></i></button>
+            <button type="button" data-action="toggle-roll-release" data-token-uuid="{{tokenUuid}}" title="{{#if rollReleased}}{{@root.labels.lockPlayerRoll}}{{else}}{{@root.labels.releasePlayerRoll}}{{/if}}" class="{{#if rollReleased}}is-released{{else}}is-locked{{/if}}"><i class="fa-solid {{#if rollReleased}}fa-lock-open{{else}}fa-lock{{/if}}"></i></button>
+          </div>
+        {{/if}}
+        <div class="emi-card-frame">
+          <div class="emi-character-side">
+            <img src="{{portrait}}" alt="{{name}}">
+            <div class="emi-character-shade"></div>
+            <div class="emi-character-name">{{name}}</div>
+          </div>
+
+          <div class="emi-item-side">
+            {{#if revealed}}
+              <img class="emi-item-image" src="{{result.img}}" alt="{{result.name}}">
+              <div class="emi-item-glow rarity-{{result.rarity}}"></div>
+              <div class="emi-item-data">
+                <div class="emi-rarity">{{result.rarityLabel}}</div>
+                <div class="emi-item-name">{{result.name}}</div>
+                <div class="emi-meta">
+                  <span>{{result.categoryLabel}}</span>
+                  {{#if result.requiresAttunement}}<span>{{@root.labels.attunement}}</span>{{/if}}
+                </div>
+                {{#if result.pendingFinal}}
+                  <div class="emi-delivery-status is-pending"><i class="fa-solid fa-dice"></i> {{@root.labels.finalPending}}</div>
+                {{/if}}
+                {{#if result.grantedUuid}}<div class="emi-delivery-status"><i class="fa-solid fa-box-open"></i> {{@root.labels.addedInventory}}</div>{{/if}}
+                {{#if result.grantFailed}}<div class="emi-delivery-status is-error"><i class="fa-solid fa-triangle-exclamation"></i> {{@root.labels.deliveryFailed}}</div>{{/if}}
+              </div>
+            {{else if revealing}}
+              <div class="emi-revealing-state">
+                <i class="fa-solid fa-gem fa-spin"></i>
+                <span>{{@root.labels.revealing}}</span>
+              </div>
+            {{else}}
+              <div class="emi-seal"><i class="fa-solid fa-wand-sparkles"></i></div>
+              {{#if canDraw}}
+                <button type="button" class="emi-draw" data-action="draw" data-token-uuid="{{tokenUuid}}" {{#if drawDisabled}}disabled{{/if}}>
+                  <i class="fa-solid fa-gem"></i> {{@root.labels.revealItem}}
+                </button>
+              {{else}}
+                <div class="emi-waiting">{{@root.labels.waiting}}</div>
+              {{/if}}
+            {{/if}}
+          </div>
+        </div>
+        {{#if canFinalize}}
+          <div class="emi-card-actions">
+            <button type="button" class="emi-finalize" data-action="finalize" data-token-uuid="{{tokenUuid}}"><i class="fa-solid fa-dice-d20"></i> {{finalButtonLabel}}</button>
+          </div>
+        {{else if canOpenItem}}
+          <div class="emi-card-actions">
+            <button type="button" data-action="open-item" data-token-uuid="{{tokenUuid}}"><i class="fa-solid fa-book-open"></i> {{@root.labels.openItemSheet}}</button>
+          </div>
+        {{/if}}
+      </article>
+      {{/each}}
+    </main>
+
+    {{#if isGM}}
+    <aside class="emi-gm-panel">
+      <div class="emi-gm-title">{{labels.gmControls}}</div>
+      <div class="emi-gm-list">
+        {{#each participants}}
+        <div class="emi-gm-row {{#if result.pendingFinal}}has-final-options{{/if}}">
+          <div class="emi-gm-person"><img src="{{portrait}}"><span><b>{{name}}</b><small>{{poolRemaining}} {{@root.labels.available}}</small></span></div>
+          {{#if result.pendingFinal}}
+            <div class="emi-final-options">
+              {{#if finalKindWeapon}}
+                <label>{{@root.labels.weapon}}
+                  <select data-final-override="weaponBase" data-token-uuid="{{tokenUuid}}">
+                    <option value="random">{{@root.labels.randomWeapon}}</option>
+                    {{#each weaponOptions}}<option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
+                  </select>
+                </label>
+              {{/if}}
+              {{#if finalKindScroll}}
+                <label>{{@root.labels.class}}
+                  <select data-final-override="spellClass" data-token-uuid="{{tokenUuid}}">
+                    <option value="random">{{@root.labels.randomClass}}</option>
+                    {{#each spellClassOptions}}<option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
+                  </select>
+                </label>
+                <label>{{@root.labels.school}}
+                  <select data-final-override="spellSchool" data-token-uuid="{{tokenUuid}}">
+                    <option value="random">{{@root.labels.randomSchool}}</option>
+                    {{#each spellSchoolOptions}}<option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
+                  </select>
+                </label>
+              {{/if}}
+            </div>
+          {{/if}}
+          <div class="emi-gm-actions">
+            <button data-action="toggle-roll-release" data-token-uuid="{{tokenUuid}}" title="{{#if rollReleased}}{{@root.labels.lockPlayerRoll}}{{else}}{{@root.labels.releasePlayerRoll}}{{/if}}" class="{{#if rollReleased}}is-released{{else}}is-locked{{/if}}"><i class="fa-solid {{#if rollReleased}}fa-lock-open{{else}}fa-lock{{/if}}"></i></button>
+            <button data-action="open-item" data-token-uuid="{{tokenUuid}}" title="{{@root.labels.openItemSheet}}" {{#unless canOpenItem}}disabled{{/unless}}><i class="fa-solid fa-book-open"></i></button>
+            <button data-action="reroll" data-token-uuid="{{tokenUuid}}" title="{{@root.labels.resetResult}}" {{#unless revealed}}disabled{{/unless}}><i class="fa-solid fa-rotate-right"></i></button>
+          </div>
+        </div>
+        {{/each}}
+      </div>
+    </aside>
+    {{/if}}
+
+    <footer class="emi-footer">
+      <div class="emi-progress"><span style="width: {{progress}}%"></span></div>
+      <b>{{revealedCount}} / {{totalCount}}</b>
+    </footer>
+  </section>
+</div>

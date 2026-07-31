@@ -1,0 +1,31 @@
+EasyMagicItems Software License
+
+Copyright (c) 2026 EasyModules.
+All rights reserved.
+
+This license applies to the original EasyMagicItems software code, documentation, configuration, interface design, and other original material authored for EasyMagicItems, except where a separate notice identifies third-party material or another license.
+
+Permission is granted to install and use this software for personal or commercial tabletop gaming purposes.
+
+You may:
+
+- Install and use this software in Foundry Virtual Tabletop.
+- Use this software in private, public, or commercially hosted games.
+- Stream, record, and publish gameplay using this software.
+- Create reviews, tutorials, and other content featuring this software.
+
+You may not:
+
+- Redistribute this software or any modified version.
+- Repackage, mirror, or host this software on another website or repository.
+- Sell, sublicense, rent, or commercially distribute this software.
+- Publish the source code or derivative works without prior written permission from EasyModules.
+- Remove or alter any copyright, attribution, or license notices contained in this software.
+
+EasyMagicItems references software, game data, portraits, item artwork, icons, and compendium content supplied by Foundry Virtual Tabletop, the D&D 5e game system, and the user's installed packages at runtime. Those third-party materials are not included under this license and remain subject to their respective owners' terms and licenses.
+
+Bundled audio files remain subject to the Pixabay Content License and the notices in THIRD_PARTY_ASSETS.md and THIRD_PARTY_NOTICES.md.
+
+This software is provided "as is", without warranty of any kind, express or implied. In no event shall EasyModules be liable for any claim, damages, or other liability arising from the use of this software.
+
+All intellectual property rights in the original EasyMagicItems material remain the exclusive property of EasyModules. All rights not expressly granted by this license are reserved.

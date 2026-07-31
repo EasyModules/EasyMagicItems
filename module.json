@@ -1,0 +1,60 @@
+{
+  "id": "easy-magic-items",
+  "title": "EasyMagicItems",
+  "description": "A cinematic magic item draw experience for the D&D 5e system. Personalized item pools based on class, level, and proficiencies, with automated item delivery. Part of the EasyModules suite.",
+  "version": "1.0.0",
+  "authors": [
+    {
+      "name": "EasyModules",
+      "url": "https://github.com/EasyModules"
+    }
+  ],
+  "compatibility": {
+    "minimum": "14",
+    "verified": "14.364"
+  },
+  "esmodules": [
+    "scripts/main.mjs"
+  ],
+  "styles": [
+    "styles/easy-magic-items.css"
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    }
+  ],
+  "relationships": {
+    "systems": [
+      {
+        "id": "dnd5e",
+        "type": "system",
+        "compatibility": {
+          "minimum": "5.3.0",
+          "verified": "5.3.3"
+        }
+      }
+    ],
+    "requires": [
+      {
+        "id": "easy-modules",
+        "type": "module",
+        "compatibility": {
+          "minimum": "1.0.0"
+        },
+        "manifest": "https://raw.githubusercontent.com/EasyModules/EasyModules/main/module.json"
+      }
+    ]
+  },
+  "socket": true,
+  "readme": "README.md",
+  "license": "LICENSE",
+  "changelog": "CHANGELOG.md",
+  "protected": false,
+  "url": "https://www.patreon.com/EasyModules",
+  "bugs": "https://www.patreon.com/EasyModules",
+  "manifest": "https://pub-a0dbd9caa6ad47db8ffa7f66624e8987.r2.dev/module.json",
+  "download": "https://pub-a0dbd9caa6ad47db8ffa7f66624e8987.r2.dev/easy-magic-items.zip"
+}
