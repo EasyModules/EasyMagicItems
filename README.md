@@ -1,3 +1,5 @@
+Follow for more... https://www.patreon.com/EasyModules
+
 # EasyMagicItems
 
 EasyMagicItems creates a cinematic, synchronized magic-item draw experience for Foundry Virtual Tabletop using the D&D 5e system.
@@ -56,6 +58,10 @@ See `COMPATIBILITY.md` for the full compatibility assessment and regression chec
 ## Support
 
 Report bugs through the [EasyMagicItems issue tracker](https://github.com/EasyModules/EasyMagicItems/issues).
+
+## Development
+
+EasyMagicItems is developed and maintained by EasyModules with AI-assisted implementation and code review. Release decisions, testing, licensing, and maintenance remain the responsibility of EasyModules.
 
 ## Credits and License
 

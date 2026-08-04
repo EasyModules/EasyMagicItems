@@ -1,4 +1,4 @@
-# EasyMagicItems 1.0.2 — Compatibility and Update Fragility Report
+# EasyMagicItems 1.0.1 — Compatibility and Update Fragility Report
 
 ## Scope
 

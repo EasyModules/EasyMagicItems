@@ -2,7 +2,7 @@
   "id": "easy-magic-items",
   "title": "EasyMagicItems",
   "description": "A cinematic magic item draw experience for the D&D 5e system. Personalized item pools based on class, level, and proficiencies, with automated item delivery. Part of the EasyModules suite.",
-  "version": "1.0.2",
+  "version": "1.0.1",
   "authors": [
     {
       "name": "EasyModules",

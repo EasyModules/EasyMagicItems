@@ -105,9 +105,6 @@ function categorize(entry) {
   const documentType = String(entry.type ?? "");
   const subtype = String(getValue(entry, "system.type.value", ""));
   const baseItem = String(getValue(entry, "system.type.baseItem", ""));
-  const name = normalizeName(entry.name);
-  const properties = getProperties(entry);
-
   if (documentType === "weapon") {
     // The "amm" weapon property means the weapon uses ammunition; it does not
     // mean that the document itself is ammunition.
@@ -2271,8 +2268,9 @@ Hooks.on("deleteItem", document => { if (!document?.parent) invalidateCatalog();
 
 Hooks.once("ready", async () => {
   game.socket.on(SOCKET_NAME, onSocket);
+  const module = game.modules.get(MODULE_ID);
   const api = {
-    version: "1.0.2",
+    version: module?.version ?? "1.0.1",
     start: startDraw,
     open: startDraw,
     openConfiguration: openModuleConfiguration,
@@ -2286,7 +2284,6 @@ Hooks.once("ready", async () => {
     previewRecommendations: async actor => previewRecommendedItems(actor ?? canvas?.tokens?.controlled?.[0]?.actor)
   };
   game.easyMagicItems = api;
-  const module = game.modules.get(MODULE_ID);
   if (module) module.api = api;
   await ensureLaunchMacro();
   Hooks.callAll("easyMagicItemsReady", api);
