@@ -1,4 +1,4 @@
-# EasyMagicItems 1.0.0 — Compatibility and Update Fragility Report
+# EasyMagicItems 1.0.2 — Compatibility and Update Fragility Report
 
 ## Scope
 
@@ -29,7 +29,7 @@ The cinematic draw window still extends the legacy `Application` class. It is fu
 
 ### 3. Weapon enchantment materialization
 
-The module combines a base weapon with activities and Active Effects from an official magic-item template. Changes to `system.activities`, enchantment effect types, effect origins, or embedded effect behavior can affect final weapons. Version 1.0.0 now cleans up partial items when this process fails.
+The module combines a base weapon with activities and Active Effects from an official magic-item template. Changes to `system.activities`, enchantment effect types, effect origins, or embedded effect behavior can affect final weapons. Since version 1.0.0, the module cleans up partial items when this process fails.
 
 ### 4. Compendium IDs and schemas
 
@@ -43,7 +43,7 @@ Some class restrictions and spellcaster requirements are inferred from English i
 
 The module uses Foundry's native module socket. Game-state mutations remain GM-authoritative and sender ownership is checked. Native sockets do not provide cryptographic sender authentication, so this is appropriate for a normal trusted game table, not a hostile multi-user environment.
 
-## Hardening implemented in 1.0.0
+## Hardening implemented
 
 - Shared in-flight catalog build promise prevents duplicate indexing work.
 - Individual pack indexing failures are isolated.
@@ -53,7 +53,12 @@ The module uses Foundry's native module socket. Game-state mutations remain GM-a
 - Failed reveals do not remain permanently locked.
 - Weapon creation behaves transactionally and cleans up partial inventory documents.
 - Enchantment effects are created in one batch instead of one document at a time.
-- Public API now exposes its version.
+- Public API exposes its version.
+- Card entrances are scheduled from shared absolute timestamps rather than relying on CSS animation start time during window mounting.
+- Movement, frame light, aura, and sweep use independent Web Animations so Chromium does not resolve competing properties unpredictably.
+- Card audio is triggered by the same live-DOM event that starts each visual entrance.
+- Entrance completion uses one idempotent cleanup path with a bounded fallback timer.
+- The opening theme has its own client setting while remaining subordinate to the master audio switch.
 
 ## Recommended regression tests
 
@@ -68,10 +73,11 @@ The module uses Foundry's native module socket. Game-state mutations remain GM-a
 9. Reveal and finalize spell scrolls at several levels and with class/school filters.
 10. Reroll an automatically granted item and confirm only the module-granted copy is removed.
 11. Test player-owned reveal permissions and GM lock/release behavior.
-12. Test close, reconnect, and synchronized rendering with GM and player clients.
+12. Test close, reconnect, and synchronized rendering with GM and player clients. Confirm that cards remain hidden until their individual entrance, arrive in the same order on every client, and play one arrival/flip pair per card.
 13. Open every result sheet from both GM and player accounts.
 14. Verify chat summary creation and native chest branding.
-15. Update or replace a compendium and confirm rebuilding the catalog reflects the change.
+15. Disable only the opening theme and confirm card/interface sounds remain active; then disable master audio and confirm the entire sequence is silent.
+16. Update or replace a compendium and confirm rebuilding the catalog reflects the change.
 
 ## Upgrade policy
 

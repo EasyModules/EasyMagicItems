@@ -1,5 +1,4 @@
 # EasyMagicItems
-follow for more... https://www.patreon.com/EasyModules
 
 EasyMagicItems creates a cinematic, synchronized magic-item draw experience for Foundry Virtual Tabletop using the D&D 5e system.
 
@@ -8,12 +7,14 @@ Each participating character receives a personalized item pool based on class, l
 ## Features
 
 - Synchronized magic-item reveals for up to six characters.
+- Card-by-card cinematic opening with individual arrival, flip, glow, and audio cues.
 - Character-aware recommendations focused on items that are useful for each character.
 - Fully configurable item pools for guided or completely random rewards.
 - Independent reveal control for each player.
 - Automatic handling of compatible weapon forms and spell scrolls.
 - Optional automatic delivery to character inventories.
-- Optional chat summaries and cinematic sound effects.
+- Optional chat summaries and cinematic audio.
+- Separate controls for all audio and for the opening theme alone.
 - Integration with the EasyModules Hub.
 
 ## Requirements
@@ -27,7 +28,11 @@ EasyMagicItems reads items, artwork, portraits, and game data from the user's in
 
 ## Installation
 
-Install EasyMagicItems using the manifest link supplied through the official EasyModules Patreon distribution. Foundry will identify EasyModules as a required dependency and can locate its public manifest automatically.
+Paste this manifest URL into Foundry VTT's **Install Module** manifest field:
+
+```text
+https://github.com/EasyModules/EasyMagicItems/releases/latest/download/module.json
+```
 
 After installation:
 
@@ -38,15 +43,9 @@ After installation:
 
 ## Settings
 
-EasyMagicItems includes options for:
+EasyMagicItems includes options for character-aware pools, per-character filters, automatic inventory delivery, chat summaries, all cinematic audio, and the opening theme.
 
-- Character-aware recommended item pools.
-- Per-character item filters.
-- Automatic inventory delivery.
-- Chat summaries.
-- Optional sound effects.
-
-Sound preferences are stored locally, allowing each user to enable or disable audio independently.
+Audio preferences are stored locally for each user. Disabling **Enable all cinematic audio** silences everything. Disabling only **Play the opening theme** keeps the card and interface effects while muting the music.
 
 ## Compatibility and Maintenance
 
@@ -56,14 +55,8 @@ See `COMPATIBILITY.md` for the full compatibility assessment and regression chec
 
 ## Support
 
-Support development and access EasyModules releases and report bugs through [Patreon](https://www.patreon.com/EasyModules).
+Report bugs through the [EasyMagicItems issue tracker](https://github.com/EasyModules/EasyMagicItems/issues).
 
 ## Credits and License
 
-EasyMagicItems is distributed under the terms in `LICENSE`.
-
-Third-party asset credits, license details, and trademark notices are documented in:
-
-- `CREDITS.md`
-- `THIRD_PARTY_ASSETS.md`
-- `THIRD_PARTY_NOTICES.md`
+EasyMagicItems is distributed under the terms in `LICENSE`. Third-party asset credits, license details, and trademark notices are documented in `CREDITS.md`, `THIRD_PARTY_ASSETS.md`, and `THIRD_PARTY_NOTICES.md`.

@@ -43,9 +43,15 @@ compendiums. They are not redistributed by this package.
 
 ## Pixabay Audio
 
-The bundled sound effects are used under the Pixabay Content License. Creator
-credits, source pages, modifications, and the saved license copy are documented
-in CREDITS.md, THIRD_PARTY_ASSETS.md, and docs/licenses/.
+The bundled interface sound effects are used under the Pixabay Content License.
+Creator credits, source pages, modifications, and the saved license copy are
+documented in CREDITS.md, THIRD_PARTY_ASSETS.md, and docs/licenses/.
+
+## Project-Provided Opening Music
+
+The short opening theme is a project-provided audio asset integrated into the
+EasyMagicItems interface. Its file-level processing notes are documented in
+CREDITS.md and THIRD_PARTY_ASSETS.md.
 
 ## Trademarks
 

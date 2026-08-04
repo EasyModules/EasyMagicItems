@@ -127,9 +127,9 @@
   "EMI.Settings.AutoGrantHint": "The final item is delivered automatically after its reveal is complete.",
   "EMI.Settings.PostChat": "Post completed draws to chat",
   "EMI.Settings.PostChatHint": "Publishes the final group result after every participant finishes.",
-  "EMI.Settings.Sound": "Sound",
-  "EMI.Settings.SoundEnabled": "Enable sound effects",
-  "EMI.Settings.SoundHint": "Disable this option for a completely silent EasyMagicItems experience on this device.",
+  "EMI.Settings.Sound": "Audio",
+  "EMI.Settings.SoundEnabled": "Enable all cinematic audio",
+  "EMI.Settings.SoundHint": "Master audio switch. Disabling it silences the opening theme and every EasyMagicItems sound effect.",
   "EMI.Settings.DefaultPools": "Default character pools",
   "EMI.Settings.RecommendedDefault": "Use recommended item pools by default",
   "EMI.Settings.RecommendedDefaultHint": "When disabled, each character begins with the broad pool instead.",
@@ -138,7 +138,7 @@
   "EMI.Settings.RegisterAutoGrantHint": "When enabled, a completed draw is delivered directly to the matching character.",
   "EMI.Settings.RegisterPostChatHint": "When enabled, EasyMagicItems posts a summary after every participant has completed the draw.",
   "EMI.Settings.RegisterRecommendedHint": "When enabled, each new draw starts with a character-aware pool. When disabled, every character starts with the broad pool instead.",
-  "EMI.Settings.RegisterSoundHint": "Disable to use EasyMagicItems without any sound effects on this device.",
+  "EMI.Settings.RegisterSoundHint": "Master switch for all EasyMagicItems music and sound effects on this device.",
   "EMI.Notification.Indexing": "EasyMagicItems is indexing compatible item compendiums...",
   "EMI.Notification.RecommendedApplied": "Recommended item pools applied to every character.",
   "EMI.Notification.BroadApplied": "Broad item pools applied to every character.",
@@ -178,5 +178,8 @@
   "EMI.Common.Spell": "Spell",
   "EMI.Common.SpellScrollOf": "Spell Scroll of {spell}",
   "EMI.Error.NoCompatiblePacks": "No compatible D&D 5e item compendiums are available.",
-  "EMI.Error.EmptyCatalog": "The available compendiums did not provide any compatible magic items."
+  "EMI.Error.EmptyCatalog": "The available compendiums did not provide any compatible magic items.",
+  "EMI.Settings.OpeningThemeEnabled": "Play the opening theme",
+  "EMI.Settings.OpeningThemeHint": "Keep card and interface sounds enabled while muting only the opening music.",
+  "EMI.Settings.RegisterOpeningThemeHint": "Disable only the opening music while keeping card and interface sounds enabled. The master audio switch still overrides this setting."
 }

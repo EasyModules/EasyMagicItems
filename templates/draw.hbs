@@ -1,5 +1,5 @@
 <div class="emi-overlay">
-  <section class="emi-stage">
+  <section class="emi-stage {{#unless introComplete}}is-intro{{/unless}}">
     {{#if isGM}}
       <button type="button" class="emi-close" data-action="close" title="{{labels.close}}"><i class="fa-solid fa-xmark"></i></button>
     {{/if}}
@@ -20,7 +20,7 @@
 
     <main class="emi-cards {{cardLayoutClass}}">
       {{#each participants}}
-      <article class="emi-card {{#if revealed}}is-revealed{{/if}} {{#if revealing}}is-revealing{{/if}}" data-token-uuid="{{tokenUuid}}">
+      <article class="emi-card {{#if animateEntrance}}emi-pending-entry{{else}}emi-static{{/if}} {{#if revealed}}is-revealed{{/if}} {{#if revealing}}is-revealing{{/if}}" data-token-uuid="{{tokenUuid}}" data-entry-at="{{entryAt}}">
         {{#if isGM}}
           <div class="emi-pool-status {{#if recommendedPool}}is-recommended{{else}}is-custom{{/if}}">
             <i class="fa-solid {{#if recommendedPool}}fa-wand-magic-sparkles{{else}}fa-sliders{{/if}}"></i>

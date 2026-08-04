@@ -3,6 +3,12 @@ const SOCKET_NAME = `module.${MODULE_ID}`;
 const TEMPLATE = `modules/${MODULE_ID}/templates/draw.hbs`;
 const MAX_PARTICIPANTS = 6;
 const CLOSE_FADE_MS = 350;
+const CARD_SEQUENCE_DELAY_MS = 450;
+const CARD_SEQUENCE_INTERVAL_MS = 300;
+const CARD_FLIP_SOUND_OFFSET_MS = 180;
+const CARD_ENTRY_SETTLE_MS = 1380;
+const INTRO_TAIL_MS = 1250;
+const START_SYNC_BUFFER_MS = 650;
 const REVEAL_DELAY_MS = 1750;
 const FINAL_REVEAL_DELAY_MS = 1750;
 
@@ -10,7 +16,8 @@ const SETTINGS = {
   AUTO_GRANT: "autoGrant",
   POST_TO_CHAT: "postToChat",
   RECOMMENDED_BY_DEFAULT: "recommendedPoolsByDefault",
-  SOUND_ENABLED: "soundEnabled"
+  SOUND_ENABLED: "soundEnabled",
+  OPENING_THEME_ENABLED: "openingThemeEnabled"
 };
 
 const SPELL_CLASSES = ["bard", "cleric", "druid", "paladin", "ranger", "sorcerer", "warlock", "wizard"];
@@ -42,6 +49,10 @@ function i18nFormat(key, data = {}, fallback = key) {
   const localized = game.i18n.format(key, data);
   if (localized !== key) return localized;
   return String(fallback).replace(/\{(\w+)\}/g, (_match, token) => data[token] ?? `{${token}}`);
+}
+
+function wait(ms) {
+  return new Promise(resolve => window.setTimeout(resolve, Math.max(0, ms)));
 }
 
 function rarityLabel(key) {
@@ -560,19 +571,6 @@ function reserveRandomItem(session, tokenUuid) {
   return selected;
 }
 
-function makeFilterBadges(filters) {
-  const badges = [];
-  const rarityNames = (filters.rarities ?? []).map(rarityLabel).filter(Boolean);
-  if (rarityNames.length && rarityNames.length < RARITIES.length) badges.push(rarityNames.join(", "));
-  const categoryNames = (filters.categories ?? []).map(categoryLabel).filter(Boolean);
-  if (categoryNames.length && categoryNames.length < CATEGORIES.length) badges.push(categoryNames.join(", "));
-  if ((filters.permanence ?? []).length === 1) badges.push(filters.permanence[0] === "consumable" ? i18n("EMI.Permanence.Consumable") : i18n("EMI.Permanence.Permanent"));
-  if (filters.attunement === "required") badges.push(i18n("EMI.Attunement.Requires"));
-  if (filters.attunement === "none") badges.push(i18n("EMI.Attunement.None"));
-  return badges.slice(0, 4);
-}
-
-
 function parseScrollLevel(item) {
   const match = String(item?.name ?? "").match(/(?:level|,)?\s*(cantrip|[1-9](?:st|nd|rd|th)?)/i);
   if (!match) return null;
@@ -696,6 +694,13 @@ class MagicItemDrawApplication extends Application {
     super(options);
     this.sessionId = session.id;
     this.uiWasHidden = false;
+    this.activeSounds = new Set();
+    this.soundTimers = new Set();
+    this.introTimer = null;
+    this.entranceTimers = new Set();
+    this.playedCardCues = new Set();
+    this.entranceComplete = false;
+    this.openingSequencePlayed = false;
   }
 
   static get defaultOptions() {
@@ -718,7 +723,9 @@ class MagicItemDrawApplication extends Application {
   async getData() {
     const session = this.session;
     const participants = [];
-    for (const participant of session.participants) {
+    const introComplete = Date.now() >= Number(session.introEndsAt ?? 0);
+
+    for (const [participantIndex, participant] of session.participants.entries()) {
       const tokenDocument = await fromUuid(participant.tokenUuid);
       const actor = tokenDocument?.actor;
       const rawResult = session.results?.[participant.tokenUuid] ?? null;
@@ -726,11 +733,14 @@ class MagicItemDrawApplication extends Application {
       const revealing = (session.revealing ?? []).includes(participant.tokenUuid);
       participants.push({
         ...participant,
-        portrait: participant.portrait,
         result,
         revealed: Boolean(result),
         revealing,
-        canDraw: !result && !revealing && (game.user.isGM || (actor?.isOwner && session.rollPermissions?.[participant.tokenUuid])),
+        entryAt: Number(session.windowOpensAt ?? Date.now())
+          + CARD_SEQUENCE_DELAY_MS
+          + (participantIndex * CARD_SEQUENCE_INTERVAL_MS),
+        animateEntrance: !this.entranceComplete && !introComplete,
+        canDraw: introComplete && !result && !revealing && (game.user.isGM || (actor?.isOwner && session.rollPermissions?.[participant.tokenUuid])),
         canOpenItem: Boolean(result) && !resultNeedsFinalization(result),
         canFinalize: Boolean(result?.pendingFinal) && !revealing && (game.user.isGM || actor?.isOwner),
         finalButtonLabel: result?.finalKind === "weapon" ? i18n("EMI.Main.RollWeaponType") : i18n("EMI.Main.RollSpell"),
@@ -744,7 +754,6 @@ class MagicItemDrawApplication extends Application {
         canConfigure: game.user.isGM,
         recommendedPool: Boolean(session.recommendedPools?.[participant.tokenUuid]),
         poolRemaining: sessionPool(session, participant.tokenUuid).length,
-        filterBadges: makeFilterBadges(session.participantFilters?.[participant.tokenUuid] ?? {}),
         configureTitle: i18nFormat("EMI.Main.ConfigureCharacter", { name: participant.name })
       });
     }
@@ -755,15 +764,13 @@ class MagicItemDrawApplication extends Application {
     }
     return {
       isGM: game.user.isGM,
+      introComplete,
       participants,
       revealedCount,
       totalCount: participants.length,
       progress: participants.length ? Math.round((revealedCount / participants.length) * 100) : 0,
       poolRemaining: unseenUnion.size,
-      individualFilters: true,
       recommendedAll: session.participants.every(participant => Boolean(session.recommendedPools?.[participant.tokenUuid])),
-      autoGrant: Boolean(session.autoGrant),
-      postToChat: Boolean(session.postToChat),
       labels: {
         close: i18n("EMI.Common.Close"),
         arcaneTreasure: i18n("EMI.Main.ArcaneTreasure"),
@@ -816,17 +823,268 @@ class MagicItemDrawApplication extends Application {
     if (broadcast && game.user.isGM) game.socket.emit(SOCKET_NAME, { action: "close", sessionId: this.sessionId });
     const element = this.element?.[0] ?? this.element;
     element?.querySelector?.(".emi-overlay")?.classList.add("is-closing");
+
+    if (this.introTimer) window.clearTimeout(this.introTimer);
+    this.introTimer = null;
+    for (const timer of this.soundTimers) window.clearTimeout(timer);
+    this.soundTimers.clear();
+    for (const timer of this.entranceTimers) window.clearTimeout(timer);
+    this.entranceTimers.clear();
+
+    const stoppingAudio = stopApplicationSounds(this, { fade: 420 });
     if (playSound) void playLocalSound("close");
-    await new Promise(resolve => setTimeout(resolve, CLOSE_FADE_MS));
+    await Promise.allSettled([stoppingAudio, wait(CLOSE_FADE_MS)]);
+
     this.restoreFoundryUI();
     applications.delete(this.sessionId);
     if (game.user.isGM || options.clearSession) sessions.delete(this.sessionId);
     return super.close(closeOptions);
   }
 
+  scheduleCardEntrances(html) {
+    for (const timer of this.entranceTimers) window.clearTimeout(timer);
+    this.entranceTimers.clear();
+
+    const root = html?.[0] ?? html;
+    const cards = [...(root?.querySelectorAll?.(".emi-card[data-entry-at]") ?? [])];
+    const now = Date.now();
+    const introEndsAt = Number(this.session?.introEndsAt ?? 0);
+
+    if (!cards.length || this.entranceComplete || now >= introEndsAt) {
+      this.entranceComplete = true;
+      for (const card of cards) {
+        card.classList.remove("emi-pending-entry", "emi-entering");
+        card.classList.add("emi-static");
+      }
+      return;
+    }
+
+    const schedule = (callback, delay) => {
+      const timer = window.setTimeout(() => {
+        this.entranceTimers.delete(timer);
+        callback();
+      }, Math.max(0, delay));
+      this.entranceTimers.add(timer);
+      return timer;
+    };
+
+    const scheduleSound = (callback, delay) => {
+      const timer = window.setTimeout(() => {
+        this.soundTimers.delete(timer);
+        callback();
+      }, Math.max(0, delay));
+      this.soundTimers.add(timer);
+      return timer;
+    };
+
+    for (const card of cards) {
+      const entryAt = Number(card.dataset.entryAt ?? 0);
+      const tokenUuid = String(card.dataset.tokenUuid ?? "");
+      const settledAt = entryAt + CARD_ENTRY_SETTLE_MS;
+
+      card.classList.remove("emi-entering", "emi-static");
+
+      if (!entryAt || now >= settledAt || (tokenUuid && this.playedCardCues.has(tokenUuid))) {
+        card.classList.add("emi-static");
+        if (tokenUuid) this.playedCardCues.add(tokenUuid);
+        continue;
+      }
+
+      card.classList.add("emi-pending-entry");
+
+      const enter = () => {
+        if (this._emiClosing || !card.isConnected) return;
+
+        const frame = card.querySelector(".emi-card-frame");
+        if (!frame) {
+          card.classList.remove("emi-pending-entry", "emi-entering");
+          card.classList.add("emi-static");
+          return;
+        }
+
+        // Run movement, frame light, aura, and sweep independently so Chromium
+        // can compose each visual beat without property conflicts.
+        let aura = card.querySelector(":scope > .emi-entry-aura");
+        if (!aura) {
+          aura = document.createElement("div");
+          aura.className = "emi-entry-aura";
+          aura.setAttribute("aria-hidden", "true");
+          card.insertBefore(aura, frame);
+        }
+
+        let sweep = frame.querySelector(":scope > .emi-entry-sweep");
+        if (!sweep) {
+          sweep = document.createElement("div");
+          sweep.className = "emi-entry-sweep";
+          sweep.setAttribute("aria-hidden", "true");
+          frame.appendChild(sweep);
+        }
+
+        for (const animation of [...card.getAnimations(), ...frame.getAnimations(), ...aura.getAnimations(), ...sweep.getAnimations()]) {
+          animation.cancel();
+        }
+
+        card.classList.remove("emi-static");
+        card.classList.add("emi-pending-entry", "emi-entering");
+
+        const motion = card.animate([
+          {
+            offset: 0,
+            opacity: 0,
+            transform: "translate3d(0, 52px, 0) rotateY(-10deg) rotateZ(-1deg) scale(.94)",
+            filter: "blur(2.4px)"
+          },
+          {
+            offset: .18,
+            opacity: .14,
+            transform: "translate3d(0, 40px, 0) rotateY(-7deg) rotateZ(-.7deg) scale(.952)",
+            filter: "blur(1.8px)"
+          },
+          {
+            offset: .46,
+            opacity: .62,
+            transform: "translate3d(0, 17px, 0) rotateY(-2.5deg) rotateZ(-.2deg) scale(.982)",
+            filter: "blur(.65px)"
+          },
+          {
+            offset: .76,
+            opacity: 1,
+            transform: "translate3d(0, -3px, 0) rotateY(.8deg) rotateZ(.12deg) scale(1.006)",
+            filter: "blur(0)"
+          },
+          {
+            offset: 1,
+            opacity: 1,
+            transform: "translate3d(0, 0, 0) rotateY(0) rotateZ(0) scale(1)",
+            filter: "blur(0)"
+          }
+        ], {
+          duration: 820,
+          easing: "cubic-bezier(.16,.74,.18,1)",
+          fill: "both"
+        });
+
+        const framePulse = frame.animate([
+          {
+            offset: 0,
+            borderColor: "#55798d",
+            boxShadow: "0 16px 34px rgba(0,0,0,.52)"
+          },
+          {
+            offset: .28,
+            borderColor: "rgba(128,196,226,.92)",
+            boxShadow: "0 0 7px rgba(174,229,250,.40), 0 16px 34px rgba(0,0,0,.52)"
+          },
+          {
+            offset: .55,
+            borderColor: "#effcff",
+            boxShadow: "0 0 10px rgba(239,252,255,.98), 0 0 28px rgba(91,205,255,.92), 0 0 48px rgba(38,144,214,.48), 0 16px 34px rgba(0,0,0,.52)"
+          },
+          {
+            offset: 1,
+            borderColor: "#55798d",
+            boxShadow: "0 16px 34px rgba(0,0,0,.52)"
+          }
+        ], {
+          delay: 390,
+          duration: 690,
+          easing: "cubic-bezier(.18,.72,.2,1)",
+          fill: "both"
+        });
+
+        const auraPulse = aura.animate([
+          {
+            offset: 0,
+            opacity: 0,
+            transform: "scale(.985)",
+            borderColor: "rgba(180,232,255,0)",
+            boxShadow: "0 0 0 rgba(91,205,255,0)"
+          },
+          {
+            offset: .30,
+            opacity: .42,
+            transform: "scale(.996)",
+            borderColor: "rgba(193,239,255,.58)",
+            boxShadow: "0 0 12px rgba(181,236,255,.55), 0 0 24px rgba(91,205,255,.40)"
+          },
+          {
+            offset: .55,
+            opacity: 1,
+            transform: "scale(1.008)",
+            borderColor: "rgba(237,252,255,.98)",
+            boxShadow: "0 0 12px rgba(239,252,255,.95), 0 0 30px rgba(91,205,255,.82), 0 0 54px rgba(38,144,214,.42)"
+          },
+          {
+            offset: 1,
+            opacity: 0,
+            transform: "scale(1.018)",
+            borderColor: "rgba(180,232,255,0)",
+            boxShadow: "0 0 0 rgba(91,205,255,0)"
+          }
+        ], {
+          delay: 390,
+          duration: 690,
+          easing: "ease-out",
+          fill: "both"
+        });
+
+        const lightSweep = sweep.animate([
+          { offset: 0, opacity: 0, transform: "translate3d(-190%,0,0) skewX(-18deg)" },
+          { offset: .18, opacity: .82 },
+          { offset: .70, opacity: .58 },
+          { offset: 1, opacity: 0, transform: "translate3d(430%,0,0) skewX(-18deg)" }
+        ], {
+          delay: 420,
+          duration: 620,
+          easing: "cubic-bezier(.18,.72,.2,1)",
+          fill: "both"
+        });
+
+        if (tokenUuid && !this.playedCardCues.has(tokenUuid)) {
+          this.playedCardCues.add(tokenUuid);
+          void playLocalSound("cardArrive", null, this);
+          scheduleSound(() => void playLocalSound("cardFlip", null, this), CARD_FLIP_SOUND_OFFSET_MS);
+        }
+
+        const animations = [motion, framePulse, auraPulse, lightSweep];
+        let finalized = false;
+        const finalizeEntrance = () => {
+          if (finalized) return;
+          finalized = true;
+          if (card.isConnected) {
+            card.classList.remove("emi-entering", "emi-pending-entry");
+            card.classList.add("emi-static");
+          }
+          for (const animation of animations) animation.cancel();
+        };
+
+        const fallbackTimer = schedule(finalizeEntrance, CARD_ENTRY_SETTLE_MS);
+        Promise.allSettled(animations.map(animation => animation.finished)).then(() => {
+          window.clearTimeout(fallbackTimer);
+          this.entranceTimers.delete(fallbackTimer);
+          finalizeEntrance();
+        });
+      };
+
+      if (now < entryAt) schedule(enter, entryAt - now);
+      else window.requestAnimationFrame(() => window.requestAnimationFrame(enter));
+    }
+  }
+
   activateListeners(html) {
     super.activateListeners(html);
     this.hideFoundryUI();
+    this.scheduleCardEntrances(html);
+
+    const introEndsAt = Number(this.session?.introEndsAt ?? 0);
+    if (Date.now() < introEndsAt && !this.introTimer) {
+      this.introTimer = window.setTimeout(async () => {
+        this.introTimer = null;
+        this.entranceComplete = true;
+        if (!this._emiClosing) await this.render(false);
+      }, Math.max(0, introEndsAt - Date.now()) + 50);
+    }
+
     html.find("[data-action='close']").on("click", () => this.close());
     html.find("[data-action='toggle-recommended-all']").on("click", async event => {
       if (!game.user.isGM) return;
@@ -888,15 +1146,16 @@ class MagicItemDrawApplication extends Application {
 }
 
 const SOUNDS = {
-  open: { file: "open-crystals.ogg", volume: 0.58 },
-  cardsArrive: { file: "cards-arrive.ogg", volume: 0.68 },
-  cardsFlip: { file: "cards-flip.ogg", volume: 0.72 },
-  gmRelease: { file: "gm-release.ogg", volume: 0.58 },
-  selectItem: { file: "select-item.ogg", volume: 0.68 },
-  wheelSpin: { file: "wheel-spin.ogg", volume: 0.72 },
-  chestOpen: { file: "chest-open.ogg", volume: 0.7 },
-  reveal: { file: "item-reveal.ogg", volume: 0.72 },
-  close: { file: "window-close.ogg", volume: 1.0 }
+  open: { file: "open-crystals.ogg", volume: 0.44, channel: "environment" },
+  openingMusic: { file: "opening-music.mp3", volume: 0.38, channel: "music" },
+  cardArrive: { file: "card-arrive.mp3", volume: 0.80, channel: "interface" },
+  cardFlip: { file: "card-flip.mp3", volume: 0.92, channel: "interface" },
+  gmRelease: { file: "gm-release.ogg", volume: 0.58, channel: "interface" },
+  selectItem: { file: "select-item.ogg", volume: 0.68, channel: "interface" },
+  wheelSpin: { file: "wheel-spin.ogg", volume: 0.72, channel: "interface" },
+  chestOpen: { file: "chest-open.ogg", volume: 0.70, channel: "environment" },
+  reveal: { file: "item-reveal.ogg", volume: 0.72, channel: "interface" },
+  close: { file: "window-close.ogg", volume: 1.0, channel: "interface" }
 };
 
 function audioPath(filename) {
@@ -904,34 +1163,107 @@ function audioPath(filename) {
 }
 
 function soundsEnabled() {
-  try { return game.settings.get(MODULE_ID, SETTINGS.SOUND_ENABLED); }
+  try { return Boolean(game.settings.get(MODULE_ID, SETTINGS.SOUND_ENABLED)); }
   catch (_error) { return true; }
 }
 
-async function playLocalSound(key) {
+function openingThemeEnabled() {
+  if (!soundsEnabled()) return false;
+  try { return Boolean(game.settings.get(MODULE_ID, SETTINGS.OPENING_THEME_ENABLED)); }
+  catch (_error) { return true; }
+}
+
+function getAudioContext(channel = "interface") {
+  return game.audio?.[channel] ?? game.audio?.interface ?? game.audio?.context ?? null;
+}
+
+function trackApplicationSound(sound, application) {
+  if (!sound || !application?.activeSounds) return sound;
+
+  if (typeof sound.then === "function") {
+    void sound.then(resolved => {
+      if (resolved) application.activeSounds.add(resolved);
+    }).catch(() => {});
+    return sound;
+  }
+
+  application.activeSounds.add(sound);
+  return sound;
+}
+
+async function stopApplicationSounds(application, { fade = 100 } = {}) {
+  const sounds = [...(application?.activeSounds ?? [])];
+  application?.activeSounds?.clear();
+
+  await Promise.allSettled(sounds.map(async sound => {
+    if (!sound?.playing) return;
+    await sound.stop?.({ fade });
+  }));
+}
+
+async function playLocalSound(key, volumeOverride = null, application = null) {
   if (!soundsEnabled()) return false;
   const sound = SOUNDS[key];
-  if (!sound) return false;
-  const helper = globalThis.AudioHelper ?? foundry?.audio?.AudioHelper;
-  if (!helper?.play) return false;
+  if (!sound) {
+    console.warn(`${MODULE_ID} | Unknown sound effect: ${key}`);
+    return false;
+  }
+
+  const volume = Number.isFinite(Number(volumeOverride)) && volumeOverride !== null
+    ? Number(volumeOverride)
+    : sound.volume;
+  const src = audioPath(sound.file);
+  const channel = sound.channel ?? "interface";
+
   try {
-    await helper.play({ src: audioPath(sound.file), volume: sound.volume, autoplay: true, loop: false }, false);
-    return true;
+    const helper = foundry.audio?.AudioHelper ?? globalThis.AudioHelper;
+    if (helper?.play) {
+      const instance = helper.play({
+        src,
+        volume,
+        autoplay: true,
+        loop: false,
+        channel
+      }, false);
+      trackApplicationSound(instance, application);
+      return instance || true;
+    }
+  } catch (error) {
+    console.warn(`${MODULE_ID} | One-shot audio failed; trying instance fallback.`, {
+      key, src, error
+    });
+  }
+
+  try {
+    if (!game.audio?.create) return false;
+    const instance = game.audio.create({
+      src,
+      context: getAudioContext(channel),
+      singleton: false,
+      preload: true,
+      autoplay: true,
+      autoplayOptions: { volume, loop: false }
+    });
+    trackApplicationSound(instance, application);
+    return instance;
   } catch (error) {
     console.warn(`${MODULE_ID} | Could not play sound: ${key}`, error);
     return false;
   }
 }
 
-function playOpeningSequence() {
-  void playLocalSound("open");
-  setTimeout(() => void playLocalSound("cardsArrive"), 350);
-  setTimeout(() => void playLocalSound("cardsFlip"), 800);
+function playOpeningSequence(application = null) {
+  void playLocalSound("open", null, application);
+  if (openingThemeEnabled()) void playLocalSound("openingMusic", null, application);
 }
 
-function playRollingSequence() {
-  void playLocalSound("wheelSpin");
-  setTimeout(() => void playLocalSound("chestOpen"), 900);
+function playRollingSequence(application = null) {
+  void playLocalSound("wheelSpin", null, application);
+  const timer = window.setTimeout(() => {
+    application?.soundTimers?.delete(timer);
+    void playLocalSound("chestOpen", null, application);
+  }, 900);
+  application?.soundTimers?.add(timer);
 }
 
 async function openOrRefresh(session, { openingSound = false, sound = null } = {}) {
@@ -941,12 +1273,23 @@ async function openOrRefresh(session, { openingSound = false, sound = null } = {
     app = new MagicItemDrawApplication(session);
     applications.set(session.id, app);
   }
-  if (openingSound) playOpeningSequence();
+
+  let playIntro = false;
+  if (openingSound && !app.openingSequencePlayed) {
+    app.openingSequencePlayed = true;
+    const opensAt = Number(session.windowOpensAt ?? Date.now());
+    const introEndsAt = Number(session.introEndsAt ?? opensAt);
+    if (Date.now() < opensAt) await wait(opensAt - Date.now());
+    playIntro = Date.now() < introEndsAt + 250;
+  }
+
   await app.render(true);
-  if (sound === "rolling") playRollingSequence();
-  else if (sound === "reveal") void playLocalSound("reveal");
-  else if (sound === "reroll") void playLocalSound("cardsFlip");
-  else if (sound === "release") void playLocalSound("gmRelease");
+
+  if (playIntro) playOpeningSequence(app);
+  if (sound === "rolling") playRollingSequence(app);
+  else if (sound === "reveal") void playLocalSound("reveal", null, app);
+  else if (sound === "reroll") void playLocalSound("cardFlip", null, app);
+  else if (sound === "release") void playLocalSound("gmRelease", null, app);
 }
 
 function sessionForSocket(session) {
@@ -1662,9 +2005,17 @@ async function startDraw() {
     return ui.notifications.error(i18n("EMI.Error.IndividualFiltersNotDistinct"));
   }
 
+  const windowOpensAt = Date.now() + START_SYNC_BUFFER_MS;
+  const introEndsAt = windowOpensAt
+    + CARD_SEQUENCE_DELAY_MS
+    + ((selected.length - 1) * CARD_SEQUENCE_INTERVAL_MS)
+    + INTRO_TAIL_MS;
+
   const session = {
     id: foundry.utils.randomID(),
     createdBy: game.user.id,
+    windowOpensAt,
+    introEndsAt,
     autoGrant: Boolean(autoGrant),
     postToChat: Boolean(postToChat),
     finalOverrides: {},
@@ -1686,8 +2037,8 @@ async function startDraw() {
     summaryPosting: false
   };
 
-  await openOrRefresh(session, { openingSound: true });
   game.socket.emit(SOCKET_NAME, { action: "start", session: sessionForSocket(session) });
+  await openOrRefresh(session, { openingSound: true });
 }
 
 async function ensureLaunchMacro() {
@@ -1776,6 +2127,7 @@ async function openModuleConfiguration() {
   const postToChat = game.settings.get(MODULE_ID, SETTINGS.POST_TO_CHAT);
   const recommendedByDefault = game.settings.get(MODULE_ID, SETTINGS.RECOMMENDED_BY_DEFAULT);
   const soundEnabled = game.settings.get(MODULE_ID, SETTINGS.SOUND_ENABLED);
+  const openingThemeEnabledSetting = game.settings.get(MODULE_ID, SETTINGS.OPENING_THEME_ENABLED);
   const checked = value => value ? "checked" : "";
   const { DialogV2 } = foundry.applications.api;
   return DialogV2.wait({
@@ -1790,6 +2142,7 @@ async function openModuleConfiguration() {
       </fieldset>
       <fieldset><legend>${i18n("EMI.Settings.Sound")}</legend>
         <label class="emi-setting-row"><input type="checkbox" name="sound-enabled" ${checked(soundEnabled)}><span><b>${i18n("EMI.Settings.SoundEnabled")}</b><small>${i18n("EMI.Settings.SoundHint")}</small></span></label>
+        <label class="emi-setting-row emi-setting-subrow"><input type="checkbox" name="opening-theme-enabled" ${checked(openingThemeEnabledSetting)}><span><b>${i18n("EMI.Settings.OpeningThemeEnabled")}</b><small>${i18n("EMI.Settings.OpeningThemeHint")}</small></span></label>
       </fieldset>
       <fieldset><legend>${i18n("EMI.Settings.DefaultPools")}</legend>
         <label class="emi-setting-row"><input type="checkbox" name="recommended-default" ${checked(recommendedByDefault)}><span><b>${i18n("EMI.Settings.RecommendedDefault")}</b><small>${i18n("EMI.Settings.RecommendedDefaultHint")}</small></span></label>
@@ -1802,6 +2155,7 @@ async function openModuleConfiguration() {
         await game.settings.set(MODULE_ID, SETTINGS.POST_TO_CHAT, Boolean(form.querySelector("input[name='post-to-chat']:checked")));
         await game.settings.set(MODULE_ID, SETTINGS.RECOMMENDED_BY_DEFAULT, Boolean(form.querySelector("input[name='recommended-default']:checked")));
         await game.settings.set(MODULE_ID, SETTINGS.SOUND_ENABLED, Boolean(form.querySelector("input[name='sound-enabled']:checked")));
+        await game.settings.set(MODULE_ID, SETTINGS.OPENING_THEME_ENABLED, Boolean(form.querySelector("input[name='opening-theme-enabled']:checked")));
         ui.notifications.info(i18n("EMI.Notification.SettingsSaved"));
         return true;
       }},
@@ -1817,6 +2171,7 @@ async function resetModuleSettings() {
   await game.settings.set(MODULE_ID, SETTINGS.POST_TO_CHAT, true);
   await game.settings.set(MODULE_ID, SETTINGS.RECOMMENDED_BY_DEFAULT, true);
   await game.settings.set(MODULE_ID, SETTINGS.SOUND_ENABLED, true);
+  await game.settings.set(MODULE_ID, SETTINGS.OPENING_THEME_ENABLED, true);
   ui.notifications.info(i18n("EMI.Notification.SettingsRestored"));
   return true;
 }
@@ -1897,6 +2252,14 @@ Hooks.once("init", () => {
     type: Boolean,
     default: true
   });
+  game.settings.register(MODULE_ID, SETTINGS.OPENING_THEME_ENABLED, {
+    name: "EMI.Settings.OpeningThemeEnabled",
+    hint: "EMI.Settings.RegisterOpeningThemeHint",
+    scope: "client",
+    config: true,
+    type: Boolean,
+    default: true
+  });
 });
 
 Hooks.on("createCompendium", invalidateCatalog);
@@ -1909,7 +2272,7 @@ Hooks.on("deleteItem", document => { if (!document?.parent) invalidateCatalog();
 Hooks.once("ready", async () => {
   game.socket.on(SOCKET_NAME, onSocket);
   const api = {
-    version: "1.0.0",
+    version: "1.0.2",
     start: startDraw,
     open: startDraw,
     openConfiguration: openModuleConfiguration,
