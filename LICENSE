@@ -1,31 +1,54 @@
-EasyMagicItems Software License
+EasyModules Software License — Version 1.0
 
 Copyright (c) 2026 EasyModules.
 All rights reserved.
 
-This license applies to the original EasyMagicItems software code, documentation, configuration, interface design, and other original material authored for EasyMagicItems, except where a separate notice identifies third-party material or another license.
+This license applies to the original software, documentation, and project-owned assets distributed by EasyModules. Third-party materials remain subject to their own licenses and notices.
 
-Permission is granted to install and use this software for personal or commercial tabletop gaming purposes.
+1. License Grant
+
+EasyModules grants you a non-exclusive, non-transferable license to install and use this software for personal or commercial tabletop gaming purposes, subject to the terms below.
+
+2. Permitted Use
 
 You may:
 
-- Install and use this software in Foundry Virtual Tabletop.
-- Use this software in private, public, or commercially hosted games.
-- Stream, record, and publish gameplay using this software.
-- Create reviews, tutorials, and other content featuring this software.
+- Install and use the software in Foundry Virtual Tabletop.
+- Use the software in private or public tabletop games.
+- Use the software in paid Game Master sessions or other commercial tabletop play.
+- Stream, record, and publish gameplay that uses the software.
+- Create reviews, tutorials, demonstrations, and other media that features the software.
+- Keep reasonable backup copies for your own use.
+- View source code that EasyModules itself makes publicly available.
 
-You may not:
+3. Restrictions
 
-- Redistribute this software or any modified version.
-- Repackage, mirror, or host this software on another website or repository.
-- Sell, sublicense, rent, or commercially distribute this software.
-- Publish the source code or derivative works without prior written permission from EasyModules.
-- Remove or alter any copyright, attribution, or license notices contained in this software.
+You may not, without prior written permission from EasyModules:
 
-EasyMagicItems references software, game data, portraits, item artwork, icons, and compendium content supplied by Foundry Virtual Tabletop, the D&D 5e game system, and the user's installed packages at runtime. Those third-party materials are not included under this license and remain subject to their respective owners' terms and licenses.
+- Redistribute, mirror, republish, upload, or host the software or its source code as a separate distribution.
+- Redistribute or publish modified versions, forks, derivative builds, or repackaged copies.
+- Sell, sublicense, rent, lease, or otherwise commercially distribute the software itself.
+- Remove or alter copyright, attribution, license, or third-party notice files.
+- Present the software, its code, or its project-owned assets as your own work.
 
-Bundled audio files remain subject to the Pixabay Content License and the notices in THIRD_PARTY_ASSETS.md and THIRD_PARTY_NOTICES.md.
+4. Ownership
 
-This software is provided "as is", without warranty of any kind, express or implied. In no event shall EasyModules be liable for any claim, damages, or other liability arising from the use of this software.
+The software is licensed, not sold. All rights, title, and interest in original EasyModules material remain with EasyModules. No rights are granted except those expressly stated in this license.
 
-All intellectual property rights in the original EasyMagicItems material remain the exclusive property of EasyModules. All rights not expressly granted by this license are reserved.
+5. Third-Party Material
+
+This license does not replace or restrict licenses that apply to third-party software, game content, trademarks, or other materials referenced or used by the module. See the package's third-party notices where provided.
+
+6. No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+7. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, EASYMODULES SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM OR RELATED TO THE SOFTWARE OR ITS USE.
+
+8. Termination
+
+Your rights under this license terminate if you materially violate these terms. Upon termination, you must stop redistributing or using any unauthorized copies or derivative distributions.
+
+All rights not expressly granted are reserved by EasyModules.

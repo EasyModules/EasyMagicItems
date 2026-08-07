@@ -2,7 +2,7 @@ Follow for more... https://www.patreon.com/EasyModules
 
 # EasyMagicItems
 
-EasyMagicItems creates a cinematic, synchronized magic-item draw experience for Foundry Virtual Tabletop using the D&D 5e system.
+EasyMagicItems provides a fast, immersive, and cinematic way to generate and distribute balanced magic items in Foundry Virtual Tabletop, with advanced filters, player-specific recommendations, and seamless integration with the D&D 5e system.
 
 Each participating character receives a personalized item pool based on class, level, proficiencies, equipment, and progression. The GM controls the pace of the draw while players take part in the reveal.
 
@@ -17,13 +17,13 @@ Each participating character receives a personalized item pool based on class, l
 - Optional automatic delivery to character inventories.
 - Optional chat summaries and cinematic audio.
 - Separate controls for all audio and for the opening theme alone.
-- Integration with the EasyModules Hub.
+- Required integration with the EasyModules Hub.
 
 ## Requirements
 
-- Foundry Virtual Tabletop v14.
+- Foundry Virtual Tabletop v13 through v14.
 - D&D 5e system 5.3.0 or newer.
-- EasyModules 1.0.0 or newer.
+- EasyModules Hub 1.0.6 or newer (required).
 - Compatible D&D 5e compendiums installed and enabled.
 
 EasyMagicItems reads items, artwork, portraits, and game data from the user's installed compendiums at runtime. No D&D game content is bundled with the module.
@@ -38,18 +38,24 @@ https://github.com/EasyModules/EasyMagicItems/releases/latest/download/module.js
 
 After installation:
 
-1. Enable EasyModules and EasyMagicItems in the world.
+1. Enable EasyModules Hub and EasyMagicItems in the world.
 2. Select one to six player-character tokens.
 3. Launch EasyMagicItems from the EasyModules Hub or its provided macro entry point.
 4. Review the item pools and begin the draw.
 
 ## Settings
 
-EasyMagicItems includes options for character-aware pools, per-character filters, automatic inventory delivery, chat summaries, all cinematic audio, and the opening theme.
+EasyMagicItems includes a dedicated configuration window using the same visual language as the EasyModules suite. Settings are grouped into three focused sections:
 
-Audio preferences are stored locally for each user. Disabling **Enable all cinematic audio** silences everything. Disabling only **Play the opening theme** keeps the card and interface effects while muting the music.
+- **Draw Defaults** — choose whether new participants begin with the character-aware recommended pool or the broad item pool.
+- **Delivery** — control automatic inventory delivery and the final group summary posted to chat.
+- **Cinematic** — control all EasyMagicItems audio or mute only the opening theme.
+
+World settings are shared by the table. Audio preferences are stored locally for each user/device. Disabling **Enable all cinematic audio** silences everything; disabling only **Play the opening theme** keeps card and interface sounds active. The configuration window also includes a non-destructive **Restore defaults** action: values are not persisted until **Save Settings** is pressed.
 
 ## Compatibility and Maintenance
+
+EasyMagicItems supports Foundry VTT v13 through v14.364. The v14.364 build is the verified release target; v13 support is provided through the same public APIs and guarded compatibility paths.
 
 EasyMagicItems isolates its most update-sensitive integrations, including compendium indexing, D&D 5e spell-scroll creation, weapon enchantment materialization, Foundry sockets, and application rendering.
 

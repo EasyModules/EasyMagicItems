@@ -1,4 +1,4 @@
-# EasyMagicItems 1.0.1 — Compatibility and Update Fragility Report
+# EasyMagicItems 1.0.2 — Compatibility and Update Fragility Report
 
 ## Scope
 
@@ -8,11 +8,11 @@ This report evaluates the module against small Foundry updates, major Foundry re
 
 | Update type | Risk | Main reason |
 |---|---:|---|
-| Small Foundry v14 updates | Low to moderate | Legacy `Application`, socket lifecycle, chat rendering hook, and document sheet rendering |
+| Small Foundry v13/v14 updates | Low to moderate | Legacy `Application`, socket lifecycle, chat rendering hook, and document sheet rendering |
 | New major Foundry version | Moderate to high | Legacy `Application` may be removed or materially changed; scene/token and sheet APIs may move |
 | Small D&D 5e 5.3.x updates | Moderate | Item schemas, enchantment effects, spell metadata, and scroll generation helper |
 | New major D&D 5e version | High | Compendium IDs, item schema, activity/enchantment format, class/proficiency data, and scroll API |
-| EasyModules updates | Low | Integration uses a small public API surface; minimum supported version is 1.0.0 |
+| EasyModules updates | Low | Integration uses a small public API surface; minimum supported version is 1.0.6 |
 | Official compendium content updates | Moderate | Item names, pack IDs, rarity/type fields, source metadata, and spell class metadata may change |
 | Third-party compendium updates | Low | The module primarily targets official `dnd5e.*` packs and ignores unrelated packs |
 | Other module updates | Low | No monkey patches or direct dependencies on third-party modules |
@@ -21,7 +21,7 @@ This report evaluates the module against small Foundry updates, major Foundry re
 
 ### 1. Legacy Foundry Application
 
-The cinematic draw window still extends the legacy `Application` class. It is functional for Foundry v14, but this is the largest Foundry-major-version risk. A future migration should move the UI to `ApplicationV2` while preserving the current template and event contract.
+The cinematic draw window still extends the legacy `Application` class. It is functional for Foundry v13 and v14, but this is the largest Foundry-major-version risk. A future migration should move the UI to `ApplicationV2` while preserving the current template and event contract.
 
 ### 2. D&D 5e scroll creation
 
@@ -59,6 +59,7 @@ The module uses Foundry's native module socket. Game-state mutations remain GM-a
 - Card audio is triggered by the same live-DOM event that starts each visual entrance.
 - Entrance completion uses one idempotent cleanup path with a bounded fallback timer.
 - The opening theme has its own client setting while remaining subordinate to the master audio switch.
+- The custom configuration dialog uses DialogV2 with render hooks compatible with Foundry v13/v14 and preserves native registered settings as a fallback entry point.
 
 ## Recommended regression tests
 

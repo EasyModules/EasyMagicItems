@@ -2118,48 +2118,219 @@ document.addEventListener("input", event => {
 });
 
 
+function settingsToggleCard({ name, label, hint, enabled, icon, scope = "world", extraClass = "", overrideLabel = "" }) {
+  const checked = enabled ? "checked" : "";
+  const scopeLabel = scope === "client" ? i18n("EMI.Settings.ScopeDevice") : i18n("EMI.Settings.ScopeWorld");
+  const scopeIcon = scope === "client" ? "fa-display" : "fa-globe";
+  return `<label class="emi-settings-card ${extraClass}" data-emi-setting-card="${name}">
+    <span class="emi-settings-card-icon"><i class="fas ${icon}" aria-hidden="true"></i></span>
+    <span class="emi-settings-card-copy">
+      <span class="emi-settings-card-title"><b>${label}</b><span class="emi-settings-scope"><i class="fas ${scopeIcon}" aria-hidden="true"></i>${scopeLabel}</span></span>
+      <small>${hint}</small>
+    </span>
+    <input class="emi-settings-switch" type="checkbox" name="${name}" ${checked}>
+    ${overrideLabel ? `<span class="emi-settings-override-label">${overrideLabel}</span>` : ""}
+  </label>`;
+}
+
+function buildModuleConfigurationMarkup(values) {
+  return `<section class="emi-settings-shell">
+    <header class="emi-settings-header">
+      <div class="emi-settings-mark"><i class="fas fa-gem" aria-hidden="true"></i></div>
+      <div class="emi-settings-heading">
+        <span class="emi-settings-kicker">${i18n("EMI.Settings.HeaderKicker")}</span>
+        <h1>${i18n("EMI.Settings.HeaderTitle")}</h1>
+        <p>${i18n("EMI.Settings.HeaderSubtitle")}</p>
+      </div>
+      <button type="button" class="emi-settings-restore" data-emi-restore-defaults title="${i18n("EMI.Settings.RestoreDefaultsHint")}">
+        <i class="fas fa-rotate-left" aria-hidden="true"></i><span>${i18n("EMI.Settings.RestoreDefaults")}</span>
+      </button>
+    </header>
+
+    <nav class="emi-settings-tabs" aria-label="${i18n("EMI.Settings.TabsLabel")}">
+      <button type="button" class="active" data-emi-settings-tab="draw" aria-selected="true"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i><span>${i18n("EMI.Settings.TabDraw")}</span></button>
+      <button type="button" data-emi-settings-tab="delivery" aria-selected="false"><i class="fas fa-gift" aria-hidden="true"></i><span>${i18n("EMI.Settings.TabDelivery")}</span></button>
+      <button type="button" data-emi-settings-tab="cinematic" aria-selected="false"><i class="fas fa-music" aria-hidden="true"></i><span>${i18n("EMI.Settings.TabCinematic")}</span></button>
+    </nav>
+
+    <div class="emi-settings-panels">
+      <section class="emi-settings-panel active" data-emi-settings-panel="draw">
+        <div class="emi-settings-section-heading">
+          <div><span>${i18n("EMI.Settings.TabDraw")}</span><h2>${i18n("EMI.Settings.DrawTitle")}</h2><p>${i18n("EMI.Settings.DrawHint")}</p></div>
+          <i class="fas fa-layer-group" aria-hidden="true"></i>
+        </div>
+        <div class="emi-settings-grid emi-settings-grid-single">
+          ${settingsToggleCard({
+            name: "recommended-default",
+            label: i18n("EMI.Settings.RecommendedDefault"),
+            hint: i18n("EMI.Settings.RecommendedDefaultHint"),
+            enabled: values.recommendedByDefault,
+            icon: "fa-user-check",
+            scope: "world"
+          })}
+        </div>
+        <div class="emi-settings-note"><i class="fas fa-circle-info" aria-hidden="true"></i><span>${i18n("EMI.Settings.DrawNote")}</span></div>
+      </section>
+
+      <section class="emi-settings-panel" data-emi-settings-panel="delivery">
+        <div class="emi-settings-section-heading">
+          <div><span>${i18n("EMI.Settings.TabDelivery")}</span><h2>${i18n("EMI.Settings.DeliveryTitle")}</h2><p>${i18n("EMI.Settings.DeliveryHint")}</p></div>
+          <i class="fas fa-box-open" aria-hidden="true"></i>
+        </div>
+        <div class="emi-settings-grid emi-settings-grid-two">
+          ${settingsToggleCard({
+            name: "auto-grant",
+            label: i18n("EMI.Settings.AutoGrant"),
+            hint: i18n("EMI.Settings.AutoGrantHint"),
+            enabled: values.autoGrant,
+            icon: "fa-hand-holding-heart",
+            scope: "world"
+          })}
+          ${settingsToggleCard({
+            name: "post-to-chat",
+            label: i18n("EMI.Settings.PostChat"),
+            hint: i18n("EMI.Settings.PostChatHint"),
+            enabled: values.postToChat,
+            icon: "fa-comments",
+            scope: "world"
+          })}
+        </div>
+      </section>
+
+      <section class="emi-settings-panel" data-emi-settings-panel="cinematic">
+        <div class="emi-settings-section-heading">
+          <div><span>${i18n("EMI.Settings.TabCinematic")}</span><h2>${i18n("EMI.Settings.CinematicTitle")}</h2><p>${i18n("EMI.Settings.CinematicHint")}</p></div>
+          <i class="fas fa-wave-square" aria-hidden="true"></i>
+        </div>
+        <div class="emi-settings-grid emi-settings-grid-two">
+          ${settingsToggleCard({
+            name: "sound-enabled",
+            label: i18n("EMI.Settings.SoundEnabled"),
+            hint: i18n("EMI.Settings.SoundHint"),
+            enabled: values.soundEnabled,
+            icon: "fa-volume-high",
+            scope: "client"
+          })}
+          ${settingsToggleCard({
+            name: "opening-theme-enabled",
+            label: i18n("EMI.Settings.OpeningThemeEnabled"),
+            hint: i18n("EMI.Settings.OpeningThemeHint"),
+            enabled: values.openingThemeEnabled,
+            icon: "fa-compact-disc",
+            scope: "client",
+            extraClass: "emi-settings-opening-theme",
+            overrideLabel: i18n("EMI.Settings.MasterAudioOff")
+          })}
+        </div>
+        <div class="emi-settings-note emi-settings-audio-note"><i class="fas fa-headphones" aria-hidden="true"></i><span>${i18n("EMI.Settings.CinematicNote")}</span></div>
+      </section>
+    </div>
+  </section>`;
+}
+
+function setupModuleConfigurationInteractions(root) {
+  const shell = root?.querySelector?.(".emi-settings-shell")
+    ?? (root?.matches?.(".emi-settings-shell") ? root : null);
+  if (!shell || shell.dataset.emiSettingsReady === "true") return;
+  shell.dataset.emiSettingsReady = "true";
+
+  const tabButtons = [...shell.querySelectorAll("[data-emi-settings-tab]")];
+  const panels = [...shell.querySelectorAll("[data-emi-settings-panel]")];
+  const activateTab = tabId => {
+    for (const button of tabButtons) {
+      const active = button.dataset.emiSettingsTab === tabId;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    }
+    for (const panel of panels) panel.classList.toggle("active", panel.dataset.emiSettingsPanel === tabId);
+  };
+  for (const button of tabButtons) button.addEventListener("click", () => activateTab(button.dataset.emiSettingsTab));
+
+  const soundMaster = shell.querySelector('input[name="sound-enabled"]');
+  const openingCard = shell.querySelector('[data-emi-setting-card="opening-theme-enabled"]');
+  const audioNote = shell.querySelector(".emi-settings-audio-note");
+  const syncAudioState = () => {
+    const masterEnabled = Boolean(soundMaster?.checked);
+    openingCard?.classList.toggle("is-overridden", !masterEnabled);
+    audioNote?.classList.toggle("is-warning", !masterEnabled);
+  };
+  soundMaster?.addEventListener("change", syncAudioState);
+  syncAudioState();
+
+  shell.querySelector("[data-emi-restore-defaults]")?.addEventListener("click", () => {
+    for (const input of shell.querySelectorAll('input[type="checkbox"]')) {
+      input.checked = true;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    activateTab("draw");
+  });
+}
+
 async function openModuleConfiguration() {
   if (!game.user.isGM) return ui.notifications.warn(i18n("EMI.Error.GMSettingsOnly"));
-  const autoGrant = game.settings.get(MODULE_ID, SETTINGS.AUTO_GRANT);
-  const postToChat = game.settings.get(MODULE_ID, SETTINGS.POST_TO_CHAT);
-  const recommendedByDefault = game.settings.get(MODULE_ID, SETTINGS.RECOMMENDED_BY_DEFAULT);
-  const soundEnabled = game.settings.get(MODULE_ID, SETTINGS.SOUND_ENABLED);
-  const openingThemeEnabledSetting = game.settings.get(MODULE_ID, SETTINGS.OPENING_THEME_ENABLED);
-  const checked = value => value ? "checked" : "";
-  const { DialogV2 } = foundry.applications.api;
-  return DialogV2.wait({
-    classes: ["emi-module-settings-dialog"],
-    window: { title: i18n("EMI.Settings.Title"), resizable: false, minimizable: false },
-    position: { width: Math.min(620, window.innerWidth - 60) },
-    content: `<section class="emi-module-settings">
-      <p>${i18n("EMI.Settings.Intro")}</p>
-      <fieldset><legend>${i18n("EMI.Settings.ItemDelivery")}</legend>
-        <label class="emi-setting-row"><input type="checkbox" name="auto-grant" ${checked(autoGrant)}><span><b>${i18n("EMI.Settings.AutoGrant")}</b><small>${i18n("EMI.Settings.AutoGrantHint")}</small></span></label>
-        <label class="emi-setting-row"><input type="checkbox" name="post-to-chat" ${checked(postToChat)}><span><b>${i18n("EMI.Settings.PostChat")}</b><small>${i18n("EMI.Settings.PostChatHint")}</small></span></label>
-      </fieldset>
-      <fieldset><legend>${i18n("EMI.Settings.Sound")}</legend>
-        <label class="emi-setting-row"><input type="checkbox" name="sound-enabled" ${checked(soundEnabled)}><span><b>${i18n("EMI.Settings.SoundEnabled")}</b><small>${i18n("EMI.Settings.SoundHint")}</small></span></label>
-        <label class="emi-setting-row emi-setting-subrow"><input type="checkbox" name="opening-theme-enabled" ${checked(openingThemeEnabledSetting)}><span><b>${i18n("EMI.Settings.OpeningThemeEnabled")}</b><small>${i18n("EMI.Settings.OpeningThemeHint")}</small></span></label>
-      </fieldset>
-      <fieldset><legend>${i18n("EMI.Settings.DefaultPools")}</legend>
-        <label class="emi-setting-row"><input type="checkbox" name="recommended-default" ${checked(recommendedByDefault)}><span><b>${i18n("EMI.Settings.RecommendedDefault")}</b><small>${i18n("EMI.Settings.RecommendedDefaultHint")}</small></span></label>
-      </fieldset>
-    </section>`,
-    buttons: [
-      { action: "save", label: i18n("EMI.Settings.Save"), default: true, callback: async (_event, button) => {
-        const form = button.form;
-        await game.settings.set(MODULE_ID, SETTINGS.AUTO_GRANT, Boolean(form.querySelector("input[name='auto-grant']:checked")));
-        await game.settings.set(MODULE_ID, SETTINGS.POST_TO_CHAT, Boolean(form.querySelector("input[name='post-to-chat']:checked")));
-        await game.settings.set(MODULE_ID, SETTINGS.RECOMMENDED_BY_DEFAULT, Boolean(form.querySelector("input[name='recommended-default']:checked")));
-        await game.settings.set(MODULE_ID, SETTINGS.SOUND_ENABLED, Boolean(form.querySelector("input[name='sound-enabled']:checked")));
-        await game.settings.set(MODULE_ID, SETTINGS.OPENING_THEME_ENABLED, Boolean(form.querySelector("input[name='opening-theme-enabled']:checked")));
-        ui.notifications.info(i18n("EMI.Notification.SettingsSaved"));
-        return true;
-      }},
-      { action: "cancel", label: i18n("EMI.Common.Cancel"), callback: () => false }
-    ],
-    rejectClose: false
-  });
+
+  const values = {
+    autoGrant: game.settings.get(MODULE_ID, SETTINGS.AUTO_GRANT),
+    postToChat: game.settings.get(MODULE_ID, SETTINGS.POST_TO_CHAT),
+    recommendedByDefault: game.settings.get(MODULE_ID, SETTINGS.RECOMMENDED_BY_DEFAULT),
+    soundEnabled: game.settings.get(MODULE_ID, SETTINGS.SOUND_ENABLED),
+    openingThemeEnabled: game.settings.get(MODULE_ID, SETTINGS.OPENING_THEME_ENABLED)
+  };
+
+  const DialogV2 = foundry?.applications?.api?.DialogV2;
+  if (!DialogV2?.wait) {
+    ui.notifications.error(i18n("EMI.Error.DialogUnavailable"));
+    return false;
+  }
+
+  let dialogHookId = null;
+  let applicationHookId = null;
+  const attach = (_app, element) => {
+    const root = element?.[0] ?? element;
+    if (!root?.querySelector?.(".emi-settings-shell")) return;
+    setupModuleConfigurationInteractions(root);
+    if (dialogHookId !== null) Hooks.off("renderDialogV2", dialogHookId);
+    if (applicationHookId !== null) Hooks.off("renderApplicationV2", applicationHookId);
+  };
+  dialogHookId = Hooks.on("renderDialogV2", attach);
+  applicationHookId = Hooks.on("renderApplicationV2", attach);
+
+  try {
+    return await DialogV2.wait({
+      classes: ["emi-module-settings-dialog"],
+      window: {
+        title: i18n("EMI.Settings.Title"),
+        icon: "fas fa-gem",
+        resizable: true,
+        minimizable: false
+      },
+      position: { width: Math.min(780, Math.max(460, window.innerWidth - 72)) },
+      content: buildModuleConfigurationMarkup(values),
+      buttons: [
+        { action: "cancel", label: i18n("EMI.Common.Cancel"), callback: () => false },
+        {
+          action: "save",
+          label: i18n("EMI.Settings.Save"),
+          icon: "fas fa-floppy-disk",
+          default: true,
+          callback: async (_event, button) => {
+            const form = button.form;
+            await game.settings.set(MODULE_ID, SETTINGS.AUTO_GRANT, Boolean(form.querySelector("input[name='auto-grant']:checked")));
+            await game.settings.set(MODULE_ID, SETTINGS.POST_TO_CHAT, Boolean(form.querySelector("input[name='post-to-chat']:checked")));
+            await game.settings.set(MODULE_ID, SETTINGS.RECOMMENDED_BY_DEFAULT, Boolean(form.querySelector("input[name='recommended-default']:checked")));
+            await game.settings.set(MODULE_ID, SETTINGS.SOUND_ENABLED, Boolean(form.querySelector("input[name='sound-enabled']:checked")));
+            await game.settings.set(MODULE_ID, SETTINGS.OPENING_THEME_ENABLED, Boolean(form.querySelector("input[name='opening-theme-enabled']:checked")));
+            ui.notifications.info(i18n("EMI.Notification.SettingsSaved"));
+            return true;
+          }
+        }
+      ],
+      rejectClose: false
+    });
+  } finally {
+    if (dialogHookId !== null) Hooks.off("renderDialogV2", dialogHookId);
+    if (applicationHookId !== null) Hooks.off("renderApplicationV2", applicationHookId);
+  }
 }
 
 async function resetModuleSettings() {
@@ -2270,7 +2441,7 @@ Hooks.once("ready", async () => {
   game.socket.on(SOCKET_NAME, onSocket);
   const module = game.modules.get(MODULE_ID);
   const api = {
-    version: module?.version ?? "1.0.1",
+    version: module?.version ?? "1.0.2",
     start: startDraw,
     open: startDraw,
     openConfiguration: openModuleConfiguration,
