@@ -1,85 +1,118 @@
-# EasyMagicItems 1.0.2 — Compatibility and Update Fragility Report
+# EasyMagicItems 1.1.0 — Compatibility and Update Fragility Report
 
-## Scope
+## Current support state
 
-This report evaluates the module against small Foundry updates, major Foundry releases, D&D 5e system updates, EasyModules updates, compendium changes, and third-party module interactions.
+This release preserves the D&D 5e 5.3.x path and adds capability-based support for D&D 5e 6.x. Static validation was performed against D&D 5e 6.0.3 and the official Player's Handbook module supplied for the audit. Runtime verification in a clean Foundry world is still required before increasing the manifest `verified` value above D&D 5e 5.3.3.
+
+D&D 5e 6.0.3 requires Foundry v14.367 or newer. EasyMagicItems itself still avoids hard-coding that Foundry minimum so the 5.3.x branch can continue to load on supported older v13/v14 installations.
 
 ## Risk summary
 
 | Update type | Risk | Main reason |
 |---|---:|---|
-| Small Foundry v13/v14 updates | Low to moderate | Legacy `Application`, socket lifecycle, chat rendering hook, and document sheet rendering |
-| New major Foundry version | Moderate to high | Legacy `Application` may be removed or materially changed; scene/token and sheet APIs may move |
-| Small D&D 5e 5.3.x updates | Moderate | Item schemas, enchantment effects, spell metadata, and scroll generation helper |
-| New major D&D 5e version | High | Compendium IDs, item schema, activity/enchantment format, class/proficiency data, and scroll API |
-| EasyModules updates | Low | Integration uses a small public API surface; minimum supported version is 1.0.6 |
-| Official compendium content updates | Moderate | Item names, pack IDs, rarity/type fields, source metadata, and spell class metadata may change |
-| Third-party compendium updates | Low | The module primarily targets official `dnd5e.*` packs and ignores unrelated packs |
-| Other module updates | Low | No monkey patches or direct dependencies on third-party modules |
+| Small Foundry v13/v14 updates | Low to moderate | Legacy `Application`, sockets, chat rendering, and item document lifecycle |
+| New major Foundry version | Moderate to high | Legacy `Application` may move or be removed |
+| D&D 5e 5.3.x updates | Low to moderate | Legacy rider API and compendium schema |
+| D&D 5e 6.x updates | Moderate | EnchantActivity/profile/rider APIs and registry schemas |
+| Official 2024 compendium updates | Moderate | Template/profile structure, base references, pack IDs, and metadata |
+| Official PHB updates | Low to moderate | Spell-list registry declarations and UUIDs |
+| EasyModules updates | Low | Optional integration uses a small API surface |
+| Third-party module updates | Low | No monkey patches; item creation remains system-driven |
 
-## Most fragile integrations
+## D&D 5e 6 hardening in 1.1.0
 
-### 1. Legacy Foundry Application
+### Rarity adapter
 
-The cinematic draw window still extends the legacy `Application` class. It is functional for Foundry v13 and v14, but this is the largest Foundry-major-version risk. A future migration should move the UI to `ApplicationV2` while preserving the current template and event contract.
+Catalog indexing reads both legacy `system.rarity` and modern `system.rarities`. Profile-defined rarities are also indexed, allowing template items such as +1/+2/+3 weapons and armor to remain discoverable even when the parent template has no direct rarity.
 
-### 2. D&D 5e scroll creation
+### Profile-aware template discovery
 
-`dnd5e.documents.Item5e.createScrollFromSpell` is a system helper rather than a stable cross-system Foundry API. The module has a fallback that clones the scroll template, but a system schema change may require updating both paths.
+EasyMagicItems no longer assumes that the presence of an enchantment Active Effect means the item is a construction template. It identifies official hidden, external Enchant activities and keeps playable/self enchantments on ready-to-use items.
 
-### 3. Weapon enchantment materialization
+This prevents items such as Dagger of Venom, Oil of Sharpness, and Helm of Brilliance from being misclassified as generic construction templates.
 
-The module combines a base weapon with activities and Active Effects from an official magic-item template. Changes to `system.activities`, enchantment effect types, effect origins, or embedded effect behavior can affect final weapons. Since version 1.0.0, the module cleans up partial items when this process fails.
+### Generic materializer
 
-### 4. Compendium IDs and schemas
+Weapon-only construction has been replaced by a generic materialization path. Supported official templates can resolve compatible base weapons, armor, shields, ammunition, rings, wands, and other forms without duplicating a separate creation implementation for each category.
 
-The primary packs are currently `dnd5e.items` and `dnd5e.equipment24`. Small content updates are usually safe, but renaming either pack or changing rarity, type, base item, property, source, class, school, or level fields can reduce or empty pools.
+Base resolution uses, in order:
 
-### 5. Recommendation parsing
+1. explicit official Item UUID references when available;
+2. declared base-item identifiers;
+3. structured item/category data;
+4. conservative description heuristics only as a fallback;
+5. the D&D 5e `canEnchant` validation before mutation.
 
-Some class restrictions and spellcaster requirements are inferred from English item descriptions. This is intentionally conservative, but localized or rewritten descriptions may reduce recommendation accuracy without breaking the draw itself.
+### EnchantActivity API
 
-### 6. Socket synchronization
+On D&D 5e 6.x, EasyMagicItems calls the system's `canEnchant` and `applyEnchantment` APIs rather than copying every enchantment Active Effect from the template.
 
-The module uses Foundry's native module socket. Game-state mutations remain GM-authoritative and sender ownership is checked. Native sockets do not provide cryptographic sender authentication, so this is appropriate for a normal trusted game table, not a hostile multi-user environment.
+After the selected profile is applied, riders are materialized through `effect.system.collectRiders()` plus `foundry.documents.modifyBatch()` when available. D&D 5e 5.3.x keeps the older rider helper as a capability-based fallback.
 
-## Hardening implemented
+### Supplemental profiles
 
-- Shared in-flight catalog build promise prevents duplicate indexing work.
-- Individual pack indexing failures are isolated.
-- Empty or unavailable catalog states produce explicit errors.
-- Catalog invalidation is exposed publicly and reacts to relevant document/compendium changes.
-- Reveal and finalization state always clears through `finally` blocks.
-- Failed reveals do not remain permanently locked.
-- Weapon creation behaves transactionally and cleans up partial inventory documents.
-- Enchantment effects are created in one batch instead of one document at a time.
-- Public API exposes its version.
-- Card entrances are scheduled from shared absolute timestamps rather than relying on CSS animation start time during window mounting.
-- Movement, frame light, aura, and sweep use independent Web Animations so Chromium does not resolve competing properties unpredictably.
-- Card audio is triggered by the same live-DOM event that starts each visual entrance.
-- Entrance completion uses one idempotent cleanup path with a bounded fallback timer.
-- The opening theme has its own client setting while remaining subordinate to the master audio switch.
-- The custom configuration dialog uses DialogV2 with render hooks compatible with Foundry v13/v14 and preserves native registered settings as a fallback entry point.
+Profiles that do not themselves materialize the mundane base are not treated as independent item variants when a materializing profile exists. This prevents supplemental states such as Hammer of Thunderbolts' paired-attunement profile from replacing the actual Hammer profile during the draw.
 
-## Recommended regression tests
+Profiles that represent genuine variants remain available. Static fixtures confirmed the expected distinction for +1/+2/+3 items, Armor/Ring of Resistance, Dragon Scale Mail, and Ammunition of Slaying.
 
-1. Start a draw with one and six player characters.
-2. Start two catalog rebuild requests in rapid succession and confirm only one effective build completes.
-3. Disable one official item pack and verify the remaining source still works.
-4. Disable both supported item packs and verify a clear error appears.
-5. Reveal a normal permanent item with automatic delivery enabled and disabled.
-6. Reveal a consumable item and confirm its source data is preserved.
-7. Reveal and finalize a magic weapon, then inspect name, activities, effects, image, and inventory ownership.
-8. Force an enchantment creation failure and confirm no partial weapon remains.
-9. Reveal and finalize spell scrolls at several levels and with class/school filters.
-10. Reroll an automatically granted item and confirm only the module-granted copy is removed.
-11. Test player-owned reveal permissions and GM lock/release behavior.
-12. Test close, reconnect, and synchronized rendering with GM and player clients. Confirm that cards remain hidden until their individual entrance, arrive in the same order on every client, and play one arrival/flip pair per card.
-13. Open every result sheet from both GM and player accounts.
-14. Verify chat summary creation and native chest branding.
-15. Disable only the opening theme and confirm card/interface sounds remain active; then disable master audio and confirm the entire sequence is silent.
-16. Update or replace a compendium and confirm rebuilding the catalog reflects the change.
+### Spell lists and PHB support
+
+When available, spell selection uses `dnd5e.registry.spellLists` rather than `system.sourceClass`. This supports the D&D 5e 6 schema and spell lists registered by the official Player's Handbook module. Legacy compendium metadata remains as a fallback for older systems.
+
+Scroll creation prefers `Item5e.createScrollFromCompendiumSpell`, then `createScrollFromSpell`, then the existing manual fallback.
+
+### Transaction safety
+
+If enchantment application fails after creating the mundane base item, EasyMagicItems removes that partial item and leaves the result pending so the finalization can be retried. Rider materialization is delegated to system batch operations when available.
+
+
+## Item-resolution hardening in 1.1.0
+
+The release adds a stricter invariant on top of the 6.x enchantment work: a source Item that requires an acquisition-time choice may not be added to an Actor until that choice is reserved and the resulting document passes validation. The final grant path no longer invents a missing enchantment profile as a fallback.
+
+Resolution is data-driven where the official content exposes enough structure:
+
+1. official RollTables preserve weighted probabilities;
+2. semantic tokens identify the conceptual result (damage type, creature type, golem, size, dragon, etc.);
+3. the resolver validates the selected profile/effect/activity against its actual mechanical changes;
+4. malformed UUID references are treated as hints, not unquestioned authority;
+5. only a validated resolved document may pass the inventory gate.
+
+The supplied D&D 5e 6.0.3 content contains malformed Ring of Resistance table references (including a Fire row pointing at Cold and a Poison row pointing at Necrotic). The resolver therefore reconciles the entire table/profile set one-to-one before using a row. Damage-type values are also normalized before delivery, including the observed `bludegoning` typo in Armor of Vulnerability content.
+
+The build resolves modern multi-profile templates plus ready-item variants such as Potion of Resistance, Carpet of Flying, Manual of Golems, Ring of Elemental Command, Necklace of Prayer Beads, and Robe of Useful Items. It also resolves their relevant legacy SRD counterparts, including all twelve pre-formed Armor of Resistance documents. Simple found-state quantities (beans, cards, glue/solvent ounces) are initialized before delivery.
+
+Ring of Spell Storing remains a guarded unsupported case because its mandatory found-state consists of actual stored spells rather than a scalar/profile choice. Both legacy and 2024 sources are excluded from candidate pools until that state can be represented correctly; they are not delivered raw.
+
+## Static regression findings
+
+The supplied 2024 equipment fixture contains 36 setup templates recognized by the new resolver. The profile heuristic found only one supplemental/non-materializing profile among those templates: Hammer of Thunderbolts' paired-attunement bonus. Key profile counts validated statically include:
+
+- Weapon +1/+2/+3: 3 materializing profiles.
+- Armor of Resistance: 10 materializing profiles.
+- Dragon Scale Mail: 10 materializing profiles.
+- Ammunition of Slaying: 14 materializing profiles.
+- Hammer of Thunderbolts: 2 total profiles, 1 materializing profile.
+- Flame Tongue: 1 primary materializing profile with a rider activity.
+
+The base-form resolver produced at least one compatible base for every recognized setup template in the supplied fixture.
+
+## Remaining runtime risks
+
+Static inspection cannot prove that Foundry document lifecycle hooks, ActiveEffect preparation, rider batch creation, ownership, or synchronized player/GM interactions behave correctly in the live world. The release therefore does not raise the manifest D&D 5e `verified` value yet.
+
+The highest-value runtime cases are Flame Tongue, Hammer of Thunderbolts, one +1/+2/+3 weapon, one generic armor template, Armor of Resistance, a fixed-form weapon, and a PHB-only spell scroll.
+
+## Probe
+
+A read-only diagnostic probe is bundled at `tools/dnd6-probe.mjs`. Run it from a temporary Script macro with:
+
+```js
+await import(`/modules/easy-magic-items/tools/dnd6-probe.mjs?${Date.now()}`);
+```
+
+The probe does not mutate actor inventories. It rebuilds indexes and checks the registry, template/profile discovery, PHB spell registration, scroll helpers, EnchantActivity methods, and the D&D 5e 6 rider API.
 
 ## Upgrade policy
 
-Do not increase the manifest `verified` Foundry or D&D 5e versions based only on static inspection. Run the regression checklist in a clean test world first. For any new major Foundry or D&D 5e release, prioritize Application compatibility, scroll generation, enchantment materialization, actor class/proficiency fields, and official compendium IDs.
+Do not increase the manifest Foundry or D&D 5e `verified` values based only on static inspection. Complete `TESTING-DND6.md` in a clean 6.0.3 test world first. For later D&D 5e releases, retest rarity schemas, EnchantActivity application, rider materialization, spell-list registration, scroll creation, and official pack IDs before changing the compatibility declaration.

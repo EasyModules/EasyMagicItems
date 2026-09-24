@@ -40,6 +40,21 @@ const RARITIES = ["common", "uncommon", "rare", "veryRare", "legendary", "artifa
 
 const CATEGORIES = ["weapon", "armor", "shield", "staff", "wand", "rod", "ring", "potion", "scroll", "ammunition", "wondrous"];
 
+const DAMAGE_TYPES = ["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"];
+const PHYSICAL_DAMAGE_TYPES = ["bludgeoning", "piercing", "slashing"];
+const CREATURE_TYPES = ["aberration", "beast", "celestial", "construct", "dragon", "elemental", "fey", "fiend", "giant", "humanoid", "monstrosity", "ooze", "plant", "undead"];
+const DRAGON_VARIANTS = [
+  { key: "black", damage: "acid" }, { key: "blue", damage: "lightning" }, { key: "brass", damage: "fire" },
+  { key: "bronze", damage: "lightning" }, { key: "copper", damage: "acid" }, { key: "gold", damage: "fire" },
+  { key: "green", damage: "poison" }, { key: "red", damage: "fire" }, { key: "silver", damage: "cold" },
+  { key: "white", damage: "cold" }
+];
+const DAMAGE_ALIASES = new Map([
+  ["bludegoning", "bludgeoning"],
+  ["bludgeonning", "bludgeoning"],
+  ["bludgeoning", "bludgeoning"]
+]);
+
 function i18n(key, fallback = key) {
   const localized = game.i18n.localize(key);
   return localized === key ? fallback : localized;
@@ -94,20 +109,305 @@ function getValue(entry, path, fallback = undefined) {
   return foundry.utils.getProperty(entry, path) ?? fallback;
 }
 
-function getProperties(entry) {
-  const raw = getValue(entry, "system.properties", []);
+function collectionValues(raw) {
+  if (!raw) return [];
   if (Array.isArray(raw)) return raw;
   if (raw instanceof Set) return [...raw];
+  if (raw instanceof Map) return [...raw.values()];
+  if (typeof raw.values === "function") {
+    try { return [...raw.values()]; } catch (_error) { /* continue */ }
+  }
+  if (typeof raw === "object") return Object.values(raw);
+  // Effects, activities and rider collections are collection-shaped. A
+  // primitive here indicates malformed source data, not a one-entry list.
   return [];
 }
 
-function categorize(entry) {
+function stringSet(raw) {
+  if (raw === null || raw === undefined || raw === "") return [];
+  if (typeof raw === "string") return raw.split(/[;,|]/).map(v => v.trim()).filter(Boolean);
+  if (Array.isArray(raw) || raw instanceof Set) return [...raw].map(String).filter(Boolean);
+  if (typeof raw === "object") {
+    return Object.entries(raw)
+      .filter(([, enabled]) => enabled === true || typeof enabled === "string" || typeof enabled === "number")
+      .map(([key, enabled]) => enabled === true ? key : String(enabled))
+      .filter(Boolean);
+  }
+  return [String(raw)];
+}
+
+function getProperties(entry) {
+  return stringSet(getValue(entry, "system.properties", []));
+}
+
+function getItemRarities(entry) {
+  const modern = stringSet(getValue(entry, "system.rarities", []));
+  const legacy = stringSet(getValue(entry, "system.rarity", ""));
+  return [...new Set([...modern, ...legacy].filter(rarity => RARITIES.includes(rarity)))];
+}
+
+function normalizeDamageType(value) {
+  const normalized = normalizeName(value).replace(/[^a-z]/g, "");
+  const aliased = DAMAGE_ALIASES.get(normalized) ?? normalized;
+  return DAMAGE_TYPES.includes(aliased) ? aliased : null;
+}
+
+function titleCase(value) {
+  return String(value ?? "").replace(/\b\w/g, match => match.toUpperCase());
+}
+
+function stripFoundryLinks(value) {
+  return String(value ?? "")
+    .replace(/@UUID\[[^\]]+\](?:\{([^}]*)\})?/gi, (_m, label) => label ?? "")
+    .replace(/@Embed\[[^\]]+\](?:\{([^}]*)\})?/gi, (_m, label) => label ?? "")
+    .replace(/@UUID\[[^\]]+\]/gi, "")
+    .replace(/\[\[\/award\s+([^\]]+)\]\]/gi, "$1");
+}
+
+function semanticTokensFromText(value) {
+  const raw = normalizeName(stripFoundryLinks(value))
+    .replace(/[×]/g, "x")
+    .replace(/\s+/g, " ");
+  const tokens = new Set();
+
+  for (const type of DAMAGE_TYPES) {
+    const aliases = type === "bludgeoning" ? ["bludgeoning", "bludegoning", "bludgeonning"] : [type];
+    if (aliases.some(alias => new RegExp(`\\b${alias}\\b`, "i").test(raw))) tokens.add(`damage:${type}`);
+  }
+
+  const creatureAliases = {
+    aberration: ["aberration", "aberrations"], beast: ["beast", "beasts"], celestial: ["celestial", "celestials"],
+    construct: ["construct", "constructs"], dragon: ["dragon", "dragons"], elemental: ["elemental", "elementals"],
+    fey: ["fey"], fiend: ["fiend", "fiends"], giant: ["giant", "giants"], humanoid: ["humanoid", "humanoids"],
+    monstrosity: ["monstrosity", "monstrosities"], ooze: ["ooze", "oozes"], plant: ["plant", "plants"], undead: ["undead"]
+  };
+  for (const [type, aliases] of Object.entries(creatureAliases)) {
+    if (aliases.some(alias => new RegExp(`\\b${alias}\\b`, "i").test(raw))) tokens.add(`creature:${type}`);
+  }
+
+  for (const { key } of DRAGON_VARIANTS) {
+    if (new RegExp(`\\b${key}\\b`, "i").test(raw)) tokens.add(`dragon:${key}`);
+  }
+
+  for (const golem of ["clay", "flesh", "iron", "stone"]) {
+    if (new RegExp(`\\b${golem}\\s+golem\\b`, "i").test(raw)) tokens.add(`golem:${golem}`);
+  }
+
+  for (const plane of ["air", "earth", "fire", "water"]) {
+    if (new RegExp(`\\b${plane}\\s+ring\\b|\\bring[^.]{0,40}\\b${plane}\\b`, "i").test(raw)) tokens.add(`element:${plane}`);
+  }
+
+  for (const bead of ["blessing", "curing", "favor", "smiting", "summons", "wind walking"]) {
+    if (new RegExp(`\\bbead\\s+of\\s+${bead.replace(" ", "\\s+")}\\b`, "i").test(raw)) tokens.add(`bead:${bead.replace(" ", "-")}`);
+  }
+
+  const size = raw.match(/\b(\d+)\s*(?:x|by)\s*(\d+)\s*(?:ft|feet|foot)?\.?/i);
+  if (size) tokens.add(`size:${size[1]}x${size[2]}`);
+
+  const bonus = raw.match(/(?:^|\s)\+([123])(?:\b|\s)/);
+  if (bonus) tokens.add(`bonus:+${bonus[1]}`);
+
+  return [...tokens];
+}
+
+function semanticTokensFromEffect(effect, allEffects = []) {
+  if (!effect) return [];
+  const tokens = new Set(semanticTokensFromText(`${effect.name ?? ""} ${effect.description ?? ""}`));
+  for (const change of effectChanges(effect)) {
+    const key = String(change?.key ?? "");
+    const value = String(change?.value ?? "");
+    if (["system.traits.dr.value", "system.traits.dv.value", "system.traits.di.value"].includes(key)) {
+      for (const raw of stringSet(value)) {
+        const type = normalizeDamageType(raw);
+        if (type) tokens.add(`damage:${type}`);
+      }
+    }
+    for (const token of semanticTokensFromText(value)) tokens.add(token);
+  }
+  const riderIds = collectionValues(effect?.flags?.dnd5e?.riders?.effect);
+  for (const riderId of riderIds) {
+    const rider = allEffects.find(candidate => String(candidate?._id ?? candidate?.id ?? "") === String(riderId));
+    for (const token of semanticTokensFromEffect(rider, [])) tokens.add(token);
+  }
+  return [...tokens];
+}
+
+function extractRollTableReferences(description) {
+  const refs = [];
+  const regex = /(?:@Embed|@UUID)\[Compendium\.([^.\]]+\.[^.\]]+)\.RollTable\.([A-Za-z0-9]+)(?:\s+[^\]]*)?\](?:\{([^}]*)\})?/gi;
+  for (const match of String(description ?? "").matchAll(regex)) {
+    refs.push({
+      packId: String(match[1] ?? "").trim(),
+      id: String(match[2] ?? "").trim(),
+      label: String(match[3] ?? "").trim(),
+      uuid: `Compendium.${String(match[1] ?? "").trim()}.RollTable.${String(match[2] ?? "").trim()}`
+    });
+  }
+  return refs;
+}
+
+function resolutionRiskFromDescription(description) {
+  const text = normalizeName(stripFoundryLinks(description));
+  return /\b(?:gm|dm)\s+(?:chooses|decides|determines)\b|\bdetermines?\s+it\s+randomly\b|\brandomly\s+determines?\b/.test(text);
+}
+
+function detectResolutionSpec(entry, packInfo, { setupActivity = null, profiles = [], description = "" } = {}) {
+  const identifier = normalizeName(getValue(entry, "system.identifier", "")).replace(/\s+/g, "-");
+  const name = normalizeName(entry.name);
+  const tables = extractRollTableReferences(description);
+  const tableUuid = tables[0]?.uuid ?? null;
+  const materializingProfiles = profiles.filter(profile => profile.materializesBase !== false);
+
+  if (setupActivity) {
+    if (materializingProfiles.length > 1) {
+      return { kind: tableUuid ? "profile-table" : "profile-choice", tableUuid };
+    }
+    return { kind: "template", tableUuid: null };
+  }
+
+  if (identifier === "potion-of-resistance") return { kind: "effect-table", tableUuid };
+  if (identifier === "carpet-of-flying" && packInfo.id === "dnd5e.equipment24") return { kind: "activity-table", tableUuid, selector: "size" };
+  if (identifier === "manual-of-golems") return { kind: packInfo.id === "dnd5e.equipment24" ? "activity-table" : "legacy-manual", tableUuid, selector: "golem" };
+  if (identifier === "ring-of-elemental-command" && name === "ring of elemental command") {
+    const choices = extractUuidReferences(description)
+      .filter(ref => /ring/i.test(ref.label) && /dnd5e\.equipment24\.Item\./i.test(ref.uuid))
+      .map(ref => ({ uuid: ref.uuid, label: ref.label }));
+    return { kind: "replacement-choice", choices };
+  }
+  if (identifier === "necklace-of-prayer-beads") return { kind: "prayer-beads", tableUuid };
+  if (identifier === "robe-of-useful-items") return { kind: "robe-patches", tableUuid };
+
+  // Treasure-state initialization. These are complete magic items whose
+  // starting quantity/contents are determined when found. Resolve the simple
+  // deterministic cases here so the actor never receives the maximum-value
+  // compendium placeholder as though it were the rolled treasure result.
+  if (identifier === "bag-of-beans") return { kind: "initial-quantity", mode: "bag-beans", unit: "beans", removeActivity: "Count Beans" };
+  if (identifier === "deck-of-illusions") return { kind: "initial-quantity", mode: "deck-illusions", unit: "cards", removeActivity: "Count Number of Cards" };
+  if (identifier === "sovereign-glue") return { kind: "initial-quantity", mode: "d6-plus-1", unit: "ounces", removeActivity: "Determine Ounces" };
+  if (identifier === "universal-solvent" && packInfo.id === "dnd5e.equipment24") return { kind: "initial-quantity", mode: "d6-plus-1", unit: "ounces", removeActivity: "Determine Ounces" };
+  if (identifier === "deck-of-many-things" && packInfo.id === "dnd5e.items") return { kind: "initial-quantity", mode: "deck-many-things", unit: "cards" };
+
+  if (packInfo.id === "dnd5e.items" && /(?:^|-)armor-of-resistance$/.test(identifier)) return { kind: "legacy-resistance", tableUuid };
+  if (packInfo.id === "dnd5e.items" && identifier === "armor-of-vulnerability") return { kind: "legacy-vulnerability", tableUuid: null };
+  if (packInfo.id === "dnd5e.items" && identifier === "dragon-scale-mail") return { kind: "legacy-dragon-scale", tableUuid: null };
+  if (packInfo.id === "dnd5e.items" && identifier === "candle-of-invocation") return { kind: "legacy-candle", tableUuid };
+
+  // A newly found Ring of Spell Storing is supposed to contain GM-selected
+  // stored spell levels. There is no safe generic representation of those
+  // spells in the current resolver yet, so exclude it instead of silently
+  // delivering an unresolved ring.
+  if (identifier === "ring-of-spell-storing") return { kind: "unsupported-initial-contents", reason: "stored-spells" };
+
+  return null;
+}
+
+function getRawActivities(source) {
+  return collectionValues(getValue(source, "system.activities", {}));
+}
+
+function getRawEffects(source) {
+  return collectionValues(source?.effects ?? []);
+}
+
+function effectChanges(effect) {
+  // Foundry v14 / dnd5e 6+ stores ActiveEffect changes on system.changes.
+  // Accessing the legacy root-level effect.changes shim on modern documents
+  // emits a deprecation warning because it exposes numeric change.mode.
+  // Prefer the modern source and only fall back to legacy data when the
+  // modern collection is genuinely absent/empty (Foundry 13 / dnd5e 5.x).
+  const modern = collectionValues(effect?.system?.changes ?? []);
+  if (modern.length) return modern;
+  return collectionValues(effect?.changes ?? []);
+}
+
+function effectChangeValues(effect, keys) {
+  const wanted = new Set(Array.isArray(keys) ? keys : [keys]);
+  return effectChanges(effect)
+    .filter(change => wanted.has(String(change?.key ?? "")))
+    .flatMap(change => stringSet(change?.value));
+}
+
+function effectProfileRarity(effect) {
+  return effectChangeValues(effect, ["system.rarities", "system.rarity"])
+    .find(value => RARITIES.includes(value)) ?? null;
+}
+
+function effectRequiresAttunement(effect) {
+  return effectChangeValues(effect, "system.attunement").some(value => value === "required" || value === "2");
+}
+
+function effectMaterializesBase(effect) {
+  return effectChanges(effect).some(change => {
+    const key = String(change?.key ?? "");
+    const value = String(change?.value ?? "");
+    const type = String(change?.type ?? "");
+    if (key === "name" && (value.includes("{}") || type === "override")) return true;
+    if (["system.description.value", "system.rarity", "system.rarities", "img"].includes(key)) return true;
+    if (key === "system.properties" && /(?:^|[,;\s])mgc(?:$|[,;\s])/.test(value)) return true;
+    return false;
+  });
+}
+
+function isSetupEnchantActivityData(activity) {
+  if (!activity || String(activity.type ?? "") !== "enchant") return false;
+  if (Boolean(activity.enchant?.self)) return false;
+  if (!collectionValues(activity.effects).length) return false;
+
+  // Official 2024 template/setup enchantments are hidden construction activities.
+  // Playable enchantments such as Oil of Sharpness and Helm of Brilliance are
+  // visible magic activities and must remain on the ready-to-use item instead.
+  const visibility = activity.visibility ?? {};
+  if (visibility.requireMagic || visibility.requireIdentification || visibility.requireAttunement) return false;
+  return true;
+}
+
+function getSetupEnchantActivityData(source) {
+  return getRawActivities(source).find(isSetupEnchantActivityData) ?? null;
+}
+
+function buildEnchantmentProfiles(source, setupActivity) {
+  if (!setupActivity) return [];
+  const allEffects = getRawEffects(source);
+  const effects = new Map(allEffects.map(effect => [String(effect?._id ?? effect?.id ?? ""), effect]));
+  return collectionValues(setupActivity.effects).map(profile => {
+    const id = String(profile?._id ?? profile?.id ?? "");
+    if (!id) return null;
+    const effect = effects.get(id);
+    const riders = foundry.utils.deepClone(profile?.riders ?? { activity: [], effect: [], item: [] });
+    const semantics = new Set(semanticTokensFromEffect(effect, allEffects));
+    for (const riderId of collectionValues(riders.effect)) {
+      const rider = effects.get(String(riderId));
+      for (const token of semanticTokensFromEffect(rider, allEffects)) semantics.add(token);
+    }
+    return {
+      id,
+      name: String(effect?.name ?? profile?.name ?? ""),
+      rarity: effectProfileRarity(effect),
+      requiresAttunement: effectRequiresAttunement(effect),
+      materializesBase: effectMaterializesBase(effect),
+      riders,
+      primarySemantics: semanticTokensFromText(effect?.name ?? profile?.name ?? ""),
+      semantics: [...semantics]
+    };
+  }).filter(Boolean);
+}
+
+function extractUuidReferences(description) {
+  const refs = [];
+  const regex = /@UUID\[([^\]]+)\](?:\{([^}]*)\})?/gi;
+  for (const match of String(description ?? "").matchAll(regex)) {
+    const uuid = String(match[1] ?? "").trim();
+    if (!uuid || !uuid.includes(".Item.")) continue;
+    refs.push({ uuid, label: String(match[2] ?? "").trim() });
+  }
+  return refs;
+}
+
+function categorize(entry, { setupActivity = null } = {}) {
   const documentType = String(entry.type ?? "");
   const subtype = String(getValue(entry, "system.type.value", ""));
   const baseItem = String(getValue(entry, "system.type.baseItem", ""));
   if (documentType === "weapon") {
-    // The "amm" weapon property means the weapon uses ammunition; it does not
-    // mean that the document itself is ammunition.
     if (baseItem === "quarterstaff" || subtype === "staff") return "staff";
     return "weapon";
   }
@@ -120,6 +420,17 @@ function categorize(entry) {
   if (subtype === "potion") return "potion";
   if (subtype === "scroll") return "scroll";
   if (subtype === "ammo") return "ammunition";
+
+  if (setupActivity) {
+    const name = normalizeName(entry.name);
+    const text = normalizeName(plainTextFromHtml(getValue(entry, "system.description.value", "")).slice(0, 650));
+    if (documentType === "consumable" && /ammunition/.test(`${name} ${text}`)) return "ammunition";
+    if (/^armor\b|\barmor\s*\(/.test(`${name} ${text}`)) return "armor";
+    if (/^shield\b|\{shield\}/.test(`${name} ${text}`)) return "shield";
+    if (/^wand\b|\{wand\}/.test(`${name} ${text}`)) return "wand";
+    if (/^ring\b|\{ring\}/.test(`${name} ${text}`)) return "ring";
+    if (/^weapon\b|\bweapon\s*\(/.test(`${name} ${text}`)) return "weapon";
+  }
 
   return "wondrous";
 }
@@ -145,28 +456,45 @@ function requiresSpellcaster(description) {
 function flattenEffectChanges(effects = []) {
   const changes = [];
   for (const effect of effects ?? []) {
-    for (const change of effect?.changes ?? []) {
-      changes.push({ key: String(change?.key ?? ""), mode: Number(change?.mode ?? 0), value: String(change?.value ?? "") });
-    }
-    for (const change of effect?.system?.changes ?? []) {
-      changes.push({ key: String(change?.key ?? ""), mode: Number(change?.mode ?? 0), value: String(change?.value ?? "") });
+    for (const change of effectChanges(effect)) {
+      changes.push({
+        key: String(change?.key ?? ""),
+        value: String(change?.value ?? ""),
+        type: String(change?.type ?? "")
+      });
     }
   }
   return changes;
 }
 
 function normalizeIndexEntry(entry, packInfo) {
-  const rarity = String(getValue(entry, "system.rarity", ""));
-  if (!rarity || !RARITIES.includes(rarity)) return null;
+  const resolutionIdentifier = normalizeName(getValue(entry, "system.identifier", "")).replace(/\s+/g, "-");
+  // The four elemental-command ring documents are implementation targets for
+  // the generic Ring of Elemental Command. Keeping both the parent and these
+  // support documents in the draw pool would double-count the same magic item
+  // and could allow duplicate concrete results in one session.
+  if (packInfo.id === "dnd5e.equipment24" && resolutionIdentifier === "ring-of-elemental-command" && normalizeName(entry.name) !== "ring of elemental command") {
+    return null;
+  }
+  const directRarities = getItemRarities(entry);
+  const setupActivity = getSetupEnchantActivityData(entry);
+  const profiles = buildEnchantmentProfiles(entry, setupActivity);
+  const profileRarities = profiles.map(profile => profile.rarity).filter(Boolean);
+  const rarities = [...new Set([...directRarities, ...profileRarities])].filter(rarity => RARITIES.includes(rarity));
+  if (!rarities.length) return null;
 
   const documentType = String(entry.type ?? "");
   const subtype = String(getValue(entry, "system.type.value", ""));
   const autoDestroy = Boolean(getValue(entry, "system.uses.autoDestroy", false));
   const consumable = documentType === "consumable" || autoDestroy;
   const attunement = String(getValue(entry, "system.attunement", ""));
-  const category = categorize(entry);
+  const category = categorize(entry, { setupActivity });
   const id = entry._id ?? entry.id;
   if (!id) return null;
+  const description = String(getValue(entry, "system.description.value", ""));
+  const rarity = directRarities[0] ?? profileRarities[0] ?? rarities[0];
+  const resolutionSpec = detectResolutionSpec(entry, packInfo, { setupActivity, profiles, description });
+  const resolutionRisk = resolutionRiskFromDescription(description);
 
   return {
     id,
@@ -178,77 +506,109 @@ function normalizeIndexEntry(entry, packInfo) {
     normalizedName: normalizeName(entry.name),
     img: String(entry.img ?? "icons/svg/item-bag.svg"),
     rarity,
+    rarities,
+    directRarities,
     rarityLabel: rarityLabel(rarity),
     category,
     categoryLabel: categoryLabel(category),
     consumable,
-    requiresAttunement: attunement === "required",
+    requiresAttunement: attunement === "required" || profiles.some(profile => profile.requiresAttunement),
     attunement,
     documentType,
     subtype,
     baseItem: String(getValue(entry, "system.type.baseItem", "")),
     properties: getProperties(entry),
     rules: String(getValue(entry, "system.source.rules", "")),
-    description: String(getValue(entry, "system.description.value", "")),
-    enchantmentTemplate: Array.isArray(entry.effects) && entry.effects.some(effect => effect?.type === "enchantment" || effect?.system?.type === "enchantment"),
-    classRestrictions: extractClassRestrictions(String(getValue(entry, "system.description.value", ""))),
-    spellcasterRestricted: requiresSpellcaster(String(getValue(entry, "system.description.value", ""))),
-    effectChanges: flattenEffectChanges(entry.effects)
+    identifier: String(getValue(entry, "system.identifier", "")),
+    description,
+    materializationMode: setupActivity ? "template" : "ready",
+    setupActivityId: String(setupActivity?._id ?? setupActivity?.id ?? ""),
+    profiles,
+    resolutionSpec,
+    resolutionRequired: Boolean(setupActivity || resolutionSpec),
+    resolutionRisk,
+    resolutionUnsupported: resolutionSpec?.kind === "unsupported-initial-contents",
+    explicitBaseUuids: extractUuidReferences(description.slice(0, 1000)).map(ref => ref.uuid),
+    enchantmentTemplate: Boolean(setupActivity),
+    classRestrictions: extractClassRestrictions(description),
+    spellcasterRestricted: requiresSpellcaster(description),
+    effectChanges: flattenEffectChanges(getRawEffects(entry))
   };
 }
 
-async function buildCatalog({ force = false } = {}) {
-  if (catalogCache && !force) return catalogCache;
-  if (catalogBuildPromise && !force) return catalogBuildPromise;
+function normalizeBaseItemEntry(entry, packInfo) {
+  if (getItemRarities(entry).length) return null;
+  if (getSetupEnchantActivityData(entry)) return null;
+  if (!["weapon", "equipment", "consumable"].includes(String(entry.type ?? ""))) return null;
+  const id = entry._id ?? entry.id;
+  if (!id) return null;
+  return {
+    id,
+    uuid: `Compendium.${packInfo.id}.Item.${id}`,
+    packId: packInfo.id,
+    sourcePriority: packInfo.priority,
+    name: String(entry.name ?? i18n("EMI.Common.UnnamedItem")),
+    normalizedName: normalizeName(entry.name),
+    img: String(entry.img ?? "icons/svg/item-bag.svg"),
+    documentType: String(entry.type ?? ""),
+    subtype: String(getValue(entry, "system.type.value", "")),
+    baseItem: String(getValue(entry, "system.type.baseItem", "")),
+    properties: getProperties(entry),
+    description: String(getValue(entry, "system.description.value", ""))
+  };
+}
 
-  const build = async () => {
-  const fields = [
-    "name", "img", "type", "system.rarity", "system.attunement",
-    "system.type.value", "system.type.baseItem", "system.properties",
-    "system.uses.autoDestroy", "system.source.rules", "system.level",
-    "system.school", "system.sourceClass", "system.classes", "system.source.classes",
-    "system.description.value", "effects"
-  ];
+async function collectRegistrySpells() {
+  const spellLists = globalThis.dnd5e?.registry?.spellLists;
+  if (!spellLists?.forType) return [];
+  try {
+    if (globalThis.dnd5e?.registry?.ready) await globalThis.dnd5e.registry.ready;
+  } catch (error) {
+    console.warn(`${MODULE_ID} | D&D5e registries did not finish cleanly; falling back to compendium spell discovery.`, error);
+  }
 
-  const all = [];
-  const baseWeapons = [];
-  const spells = [];
-  const availablePacks = [];
-
-  for (const packInfo of PACKS) {
-    const pack = game.packs.get(packInfo.id);
-    if (!pack) continue;
-    availablePacks.push(packInfo.id);
-    let index;
-    try {
-      index = await pack.getIndex({ fields });
-    } catch (error) {
-      console.warn(`${MODULE_ID} | Could not index compendium: ${packInfo.id}`, error);
-      continue;
-    }
-    for (const entry of index) {
-      const normalized = normalizeIndexEntry(entry, packInfo);
-      if (normalized) all.push(normalized);
-      const rarity = String(getValue(entry, "system.rarity", ""));
-      const baseItem = String(getValue(entry, "system.type.baseItem", ""));
-      if (entry.type === "weapon" && !rarity && baseItem) {
-        baseWeapons.push({
-          id: entry._id ?? entry.id,
-          uuid: `Compendium.${packInfo.id}.Item.${entry._id ?? entry.id}`,
-          packId: packInfo.id,
-          sourcePriority: packInfo.priority,
-          name: String(entry.name ?? baseItem),
-          normalizedName: normalizeName(entry.name),
-          baseItem,
-          subtype: String(getValue(entry, "system.type.value", "")),
-          properties: getProperties(entry),
-          img: String(entry.img ?? "icons/svg/sword.svg")
-        });
-      }
+  const byUuid = new Map();
+  for (const cls of SPELL_CLASSES) {
+    const list = spellLists.forType(`class:${cls}`) ?? spellLists.forType("class", cls);
+    if (!list) continue;
+    const uuids = collectionValues(list.uuids);
+    for (const uuid of uuids) {
+      const key = String(uuid ?? "");
+      if (!key) continue;
+      const existing = byUuid.get(key) ?? { uuid: key, classes: new Set() };
+      existing.classes.add(cls);
+      byUuid.set(key, existing);
     }
   }
 
-  // Discover official D&D5e spell packs dynamically instead of hard-coding one edition.
+  const spells = [];
+  for (const row of byUuid.values()) {
+    let spell = null;
+    try { spell = globalThis.fromUuidSync?.(row.uuid) ?? null; } catch (_error) { /* load asynchronously below */ }
+    const needsDocument = !spell || getValue(spell, "system.level", undefined) === undefined || !spell.name;
+    if (needsDocument) {
+      try { spell = await fromUuid(row.uuid); } catch (_error) { spell = null; }
+    }
+    if (!spell || String(spell.type ?? "") !== "spell") continue;
+    spells.push({
+      id: spell._id ?? spell.id,
+      uuid: row.uuid,
+      name: String(spell.name ?? i18n("EMI.Common.Spell")),
+      normalizedName: normalizeName(spell.name),
+      level: Number(getValue(spell, "system.level", 0)),
+      school: String(getValue(spell, "system.school", "")),
+      classes: [...row.classes],
+      img: String(spell.img ?? "icons/svg/book.svg"),
+      rules: String(getValue(spell, "system.source.rules", "")),
+      sourcePriority: String(row.uuid).startsWith("Compendium.dnd-players-handbook.") ? 3
+        : String(getValue(spell, "system.source.rules", "")) === "2024" ? 2 : 1
+    });
+  }
+  return spells;
+}
+
+async function collectLegacySpells(fields) {
+  const spells = [];
   for (const pack of game.packs) {
     if (pack.documentName !== "Item" || !String(pack.collection).startsWith("dnd5e.")) continue;
     let index;
@@ -256,7 +616,9 @@ async function buildCatalog({ force = false } = {}) {
     for (const entry of index) {
       if (entry.type !== "spell") continue;
       const rawClasses = getValue(entry, "system.sourceClass", getValue(entry, "system.classes", getValue(entry, "system.source.classes", [])));
-      const classes = Array.isArray(rawClasses) ? rawClasses : rawClasses && typeof rawClasses === "object" ? Object.keys(rawClasses).filter(key => rawClasses[key]) : String(rawClasses ?? "").split(/[;,|]/);
+      const classes = Array.isArray(rawClasses) ? rawClasses
+        : rawClasses && typeof rawClasses === "object" ? Object.keys(rawClasses).filter(key => rawClasses[key])
+          : String(rawClasses ?? "").split(/[;,|]/);
       spells.push({
         id: entry._id ?? entry.id,
         uuid: `Compendium.${pack.collection}.Item.${entry._id ?? entry.id}`,
@@ -265,43 +627,117 @@ async function buildCatalog({ force = false } = {}) {
         level: Number(getValue(entry, "system.level", 0)),
         school: String(getValue(entry, "system.school", "")),
         classes: classes.map(value => normalizeName(value)).filter(Boolean),
-        img: String(entry.img ?? "icons/svg/book.svg")
+        img: String(entry.img ?? "icons/svg/book.svg"),
+        rules: String(getValue(entry, "system.source.rules", "")),
+        sourcePriority: pack.collection === "dnd5e.spells24" ? 2 : 1
       });
     }
   }
+  return spells;
+}
 
-  const dedupeByName = (entries, prefer = "sourcePriority") => {
-    const map = new Map();
-    for (const entry of entries) {
-      const current = map.get(entry.normalizedName);
-      if (!current || Number(entry[prefer] ?? 0) > Number(current[prefer] ?? 0)) map.set(entry.normalizedName, entry);
+async function buildCatalog({ force = false } = {}) {
+  if (catalogCache && !force) return catalogCache;
+  if (catalogBuildPromise && !force) return catalogBuildPromise;
+
+  const build = async () => {
+    // These two catalog packs are first-party D&D5e packs with a known schema.
+    // Foundry compendium indexes reliably materialize requested leaf fields,
+    // while requesting object parents (e.g. `system.type`) can yield an
+    // incomplete index in v14 and make every entry look non-magical. Keep the
+    // catalog index explicit and leaf-based here; the broad/third-party spell
+    // discovery path below remains deliberately minimal and defensive.
+    const fields = [
+      "name", "img", "type", "system.rarity", "system.rarities", "system.attunement",
+      "system.type.value", "system.type.baseItem", "system.properties", "system.identifier",
+      "system.uses.autoDestroy", "system.level", "system.school",
+      "system.description.value", "system.activities", "effects"
+    ];
+
+    const all = [];
+    const baseItems = [];
+    const availablePacks = [];
+
+    for (const packInfo of PACKS) {
+      const pack = game.packs.get(packInfo.id);
+      if (!pack) continue;
+      availablePacks.push(packInfo.id);
+      let index;
+      try {
+        index = await pack.getIndex({ fields });
+      } catch (error) {
+        console.warn(`${MODULE_ID} | Could not index compendium: ${packInfo.id}`, error);
+        continue;
+      }
+      for (const entry of index) {
+        // Compendium indexes do not reliably include the nested ActiveEffect
+        // change data referenced by EnchantActivity profiles. That metadata is
+        // required to distinguish true materialization profiles from
+        // supplemental profiles (for example Hammer of Thunderbolts) and to
+        // recover profile-specific rarity/riders. Hydrate only entries that
+        // expose an enchant activity in the index; this is a small subset of
+        // the official equipment pack and keeps the general catalog fast.
+        const hasEnchantActivity = getRawActivities(entry).some(activity => String(activity?.type ?? "") === "enchant");
+        let catalogSource = entry;
+        if (hasEnchantActivity) {
+          const id = entry._id ?? entry.id;
+          if (id) {
+            try {
+              const document = await pack.getDocument(id);
+              if (document) catalogSource = document.toObject();
+            } catch (error) {
+              console.warn(`${MODULE_ID} | Could not hydrate enchantment template: ${packInfo.id}.${id}`, error);
+            }
+          }
+        }
+
+        const normalized = normalizeIndexEntry(catalogSource, packInfo);
+        if (normalized) all.push(normalized);
+        const base = normalizeBaseItemEntry(catalogSource, packInfo);
+        if (base) baseItems.push(base);
+      }
     }
-    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
-  };
 
-  const uniqueAcrossAllSources = new Map();
-  for (const item of all) {
-    const current = uniqueAcrossAllSources.get(item.normalizedName);
-    if (!current || item.sourcePriority > current.sourcePriority) uniqueAcrossAllSources.set(item.normalizedName, item);
-  }
+    const dedupeByName = (entries, prefer = "sourcePriority") => {
+      const map = new Map();
+      for (const entry of entries) {
+        const key = entry.normalizedName || entry.uuid;
+        const current = map.get(key);
+        if (!current || Number(entry[prefer] ?? 0) > Number(current[prefer] ?? 0)) map.set(key, entry);
+      }
+      return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+    };
 
-  if (!availablePacks.length) {
-    throw new Error(i18n("EMI.Error.NoCompatiblePacks"));
-  }
-  if (!all.length) {
-    throw new Error(i18n("EMI.Error.EmptyCatalog"));
-  }
+    let spells = await collectRegistrySpells();
+    if (!spells.length) {
+      const spellFields = [
+        "name", "img", "type", "system.level", "system.school",
+        "system.sourceClass", "system.classes"
+      ];
+      spells = await collectLegacySpells(spellFields);
+    }
 
-  catalogCache = {
-    builtAt: Date.now(),
-    availablePacks,
-    items: all.sort((a, b) => a.name.localeCompare(b.name)),
-    baseWeapons: dedupeByName(baseWeapons),
-    spells: dedupeByName(spells, "level"),
-    uniqueCount: uniqueAcrossAllSources.size
-  };
+    const uniqueAcrossAllSources = new Map();
+    for (const item of all) {
+      const current = uniqueAcrossAllSources.get(item.normalizedName);
+      if (!current || item.sourcePriority > current.sourcePriority) uniqueAcrossAllSources.set(item.normalizedName, item);
+    }
 
-  return catalogCache;
+    if (!availablePacks.length) throw new Error(i18n("EMI.Error.NoCompatiblePacks"));
+    if (!all.length) throw new Error(i18n("EMI.Error.EmptyCatalog"));
+
+    const uniqueBaseItems = dedupeByName(baseItems);
+    catalogCache = {
+      builtAt: Date.now(),
+      availablePacks,
+      items: all.sort((a, b) => a.name.localeCompare(b.name)),
+      baseItems: uniqueBaseItems,
+      baseWeapons: uniqueBaseItems.filter(item => item.documentType === "weapon" && item.baseItem),
+      spells: dedupeByName(spells),
+      uniqueCount: uniqueAcrossAllSources.size
+    };
+
+    return catalogCache;
   };
 
   catalogBuildPromise = build();
@@ -456,8 +892,12 @@ function filterCatalog(items, filters) {
   const attunement = String(filters.attunement ?? "any");
 
   const matching = items.filter(item => {
+    // Safety invariant: an item that looks acquisition-time configurable but has
+    // no resolver must never be granted as a raw template. It stays out of pools
+    // until a resolver is implemented.
+    if (item.resolutionUnsupported) return false;
     if (sources.size && !sources.has(item.packId)) return false;
-    if (rarities.size && !rarities.has(item.rarity)) return false;
+    if (rarities.size && !itemMatchesRarityFilter(item, [...rarities])) return false;
     if (categories.size && !categories.has(item.category)) return false;
     if (permanence.size) {
       const key = item.consumable ? "consumable" : "permanent";
@@ -466,12 +906,13 @@ function filterCatalog(items, filters) {
     if (attunement === "required" && !item.requiresAttunement) return false;
     if (attunement === "none" && item.requiresAttunement) return false;
     if (filters.characterClasses?.length && item.classRestrictions?.length && !item.classRestrictions.some(cls => filters.characterClasses.includes(cls))) return false;
-    if (item.category === "armor" && filters.allowedArmorTypes?.length && item.subtype && !filters.allowedArmorTypes.includes(item.subtype)) return false;
+    if (item.category === "armor" && filters.allowedArmorTypes?.length) {
+      if (item.materializationMode === "template") {
+        const compatible = compatibleBaseItems(item, catalogCache?.baseItems ?? [], { fallback: false });
+        if (!compatible.some(base => filters.allowedArmorTypes.includes(base.subtype))) return false;
+      } else if (item.subtype && !filters.allowedArmorTypes.includes(item.subtype)) return false;
+    }
     if (item.category === "shield" && filters.allowedArmorTypes?.length && !filters.allowedArmorTypes.includes("shield")) return false;
-    // Every magic-weapon result in EasyMagicItems represents an enchantment
-    // awaiting a second roll. Exclude old, already-shaped SRD variants so a
-    // selected Greataxe cannot first reveal a Longsword or a ready-made axe.
-    if (item.category === "weapon" && !isWeaponTemplateEntry(item)) return false;
     if (!itemAllowsSelectedWeapon(item, filters.weaponBase)) return false;
     if (item.category === "weapon" && filters.weaponBase === "random" && filters.allowedWeaponBases?.length) {
       const compatible = compatibleBaseWeapons(item, catalogCache?.baseWeapons ?? [], { fallback: false });
@@ -559,13 +1000,455 @@ function viableCandidates(session, tokenUuid) {
   });
 }
 
-function reserveRandomItem(session, tokenUuid) {
+function profileEffectiveRarity(item, profile) {
+  if (profile?.rarity && RARITIES.includes(profile.rarity)) return profile.rarity;
+  const direct = item?.directRarities ?? [];
+  if (direct.length === 1) return direct[0];
+  if (item?.rarity && RARITIES.includes(item.rarity)) return item.rarity;
+  return null;
+}
+
+function selectableProfiles(item, allowedRarities = []) {
+  let profiles = [...(item?.profiles ?? [])];
+  if (!profiles.length) return [];
+  const direct = item?.directRarities ?? [];
+
+  // A setup activity may also carry optional follow-up enchantments. Prefer
+  // profiles whose changes actually transform a mundane base (name/description/
+  // magic property/rarity/image). This excludes supplemental states such as
+  // Hammer of Thunderbolts' paired-attunement bonus without hard-coding names.
+  const materializing = profiles.filter(profile => profile.materializesBase !== false);
+  if (materializing.length) profiles = materializing;
+
+  const allowed = new Set(allowedRarities ?? []);
+  if (allowed.size) {
+    profiles = profiles.filter(profile => {
+      const rarity = profileEffectiveRarity(item, profile);
+      return rarity ? allowed.has(rarity) : direct.some(value => allowed.has(value));
+    });
+  }
+  return profiles;
+}
+
+function displayRarityLabel(item, filters = {}) {
+  if (item?.materializationMode === "template" && item?.profiles?.length) {
+    const rarities = [...new Set(selectableProfiles(item, filters?.rarities ?? [])
+      .map(profile => profileEffectiveRarity(item, profile))
+      .filter(Boolean))];
+    if (rarities.length === 1) return rarityLabel(rarities[0]);
+    if (rarities.length > 1) return rarities.map(rarityLabel).join(" / ");
+  }
+  return rarityLabel(item?.rarity);
+}
+
+function itemMatchesRarityFilter(item, rarities) {
+  const allowed = new Set(rarities ?? []);
+  if (!allowed.size) return true;
+  if (item?.materializationMode === "template" && item?.profiles?.length) {
+    return selectableProfiles(item, [...allowed]).length > 0;
+  }
+  return (item?.rarities ?? [item?.rarity]).some(rarity => allowed.has(rarity));
+}
+
+async function rollResolutionTable(tableUuid) {
+  if (!tableUuid) return null;
+  let table = null;
+  try { table = await fromUuid(tableUuid); } catch (_error) { table = null; }
+  if (!table || table.documentName !== "RollTable" || typeof table.roll !== "function") return null;
+  try {
+    const rolled = await table.roll({ recursive: false });
+    const results = collectionValues(rolled?.results ?? rolled?.result ?? []);
+    const result = results[0] ?? null;
+    const description = String(result?.description ?? result?.text ?? result?.name ?? "");
+    const allResults = collectionValues(table.results).map(row => ({
+      resultId: String(row?._id ?? row?.id ?? ""),
+      description: String(row?.description ?? row?.text ?? row?.name ?? ""),
+      range: foundry.utils.deepClone(row?.range ?? null)
+    }));
+    return {
+      tableUuid,
+      rollTotal: Number(rolled?.roll?.total ?? rolled?.total ?? NaN),
+      resultId: String(result?._id ?? result?.id ?? ""),
+      description,
+      range: foundry.utils.deepClone(result?.range ?? null),
+      allResults
+    };
+  } catch (error) {
+    console.warn(`${MODULE_ID} | Resolution table roll failed: ${tableUuid}`, error);
+    return null;
+  }
+}
+
+function referencedActiveEffectId(text) {
+  const match = String(text ?? "").match(/\.ActiveEffect\.([A-Za-z0-9]+)/i);
+  return match?.[1] ?? null;
+}
+
+function referencedItemUuids(text) {
+  const refs = [];
+  for (const match of String(text ?? "").matchAll(/@UUID\[([^\]]*\.Item\.[^\]]+)\](?:\{([^}]*)\})?/gi)) {
+    refs.push({ uuid: String(match[1] ?? ""), label: String(match[2] ?? "") });
+  }
+  return refs;
+}
+
+function outcomeSemanticTokens(outcome, profiles = []) {
+  if (!outcome) return [];
+  const description = String(outcome.description ?? "");
+  const explicitLabels = [...description.matchAll(/@UUID\[[^\]]+\]\{([^}]*)\}/gi)].map(match => match[1]).filter(Boolean);
+  let tokens = semanticTokensFromText(explicitLabels.length ? explicitLabels.join(" ") : stripFoundryLinks(description));
+  if (tokens.length) return tokens;
+
+  const refId = referencedActiveEffectId(description);
+  const profile = profiles.find(candidate => candidate.id === refId);
+  if (profile) return [...(profile.primarySemantics?.length ? profile.primarySemantics : profile.semantics ?? [])];
+  return [];
+}
+
+function profileMatchesTokens(profile, tokens) {
+  if (!tokens?.length) return false;
+  const primary = new Set(profile?.primarySemantics ?? []);
+  const all = new Set(profile?.semantics ?? []);
+  return tokens.some(token => primary.has(token)) || tokens.some(token => all.has(token));
+}
+
+function explicitOutcomeTokens(description) {
+  const labels = [...String(description ?? "").matchAll(/@UUID\[[^\]]+\]\{([^}]*)\}/gi)].map(match => match[1]).filter(Boolean);
+  const raw = labels.length ? labels.join(" ") : stripFoundryLinks(description);
+  return semanticTokensFromText(raw);
+}
+
+function uniqueProfileForTokens(profiles, tokens) {
+  if (!tokens?.length) return null;
+  const matches = profiles.filter(profile => profileMatchesTokens(profile, tokens));
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function sanitizedTableProfileMap(allResults, profiles) {
+  const rows = (allResults ?? []).map(row => {
+    const labelTokens = explicitOutcomeTokens(row.description);
+    const labelProfile = uniqueProfileForTokens(profiles, labelTokens);
+    const refId = referencedActiveEffectId(row.description);
+    const refProfile = profiles.find(profile => profile.id === refId) ?? null;
+    return { ...row, labelTokens, labelProfile, refProfile, chosen: labelProfile ?? refProfile ?? null };
+  });
+
+  if (rows.length !== profiles.length) {
+    return new Map(rows.filter(row => row.chosen).map(row => [row.resultId, row.chosen]));
+  }
+
+  const countChosen = () => {
+    const counts = new Map();
+    for (const row of rows) if (row.chosen) counts.set(row.chosen.id, (counts.get(row.chosen.id) ?? 0) + 1);
+    return counts;
+  };
+
+  let counts = countChosen();
+  let missing = new Set(profiles.filter(profile => !counts.has(profile.id)).map(profile => profile.id));
+  for (const row of rows) {
+    if (!row.chosen || (counts.get(row.chosen.id) ?? 0) <= 1) continue;
+    if (row.refProfile && missing.has(row.refProfile.id)) {
+      counts.set(row.chosen.id, counts.get(row.chosen.id) - 1);
+      row.chosen = row.refProfile;
+      counts.set(row.chosen.id, 1);
+      missing.delete(row.chosen.id);
+    }
+  }
+
+  counts = countChosen();
+  missing = new Set(profiles.filter(profile => !counts.has(profile.id)).map(profile => profile.id));
+  for (const row of rows) {
+    if (!row.chosen || (counts.get(row.chosen.id) ?? 0) <= 1) continue;
+    if (row.labelProfile && missing.has(row.labelProfile.id)) {
+      counts.set(row.chosen.id, counts.get(row.chosen.id) - 1);
+      row.chosen = row.labelProfile;
+      counts.set(row.chosen.id, 1);
+      missing.delete(row.chosen.id);
+    }
+  }
+
+  return new Map(rows.filter(row => row.chosen).map(row => [row.resultId, row.chosen]));
+}
+
+async function selectProfileFromOfficialTable(item, profiles, tableUuid) {
+  const outcome = await rollResolutionTable(tableUuid);
+  if (!outcome) return { profile: randomChoice(profiles), outcome: null };
+
+  const wanted = outcomeSemanticTokens(outcome, profiles);
+  const referencedId = referencedActiveEffectId(outcome.description);
+  const referenced = profiles.find(profile => profile.id === referencedId) ?? null;
+  const tableMap = sanitizedTableProfileMap(outcome.allResults ?? [], profiles);
+  const mapped = tableMap.get(outcome.resultId) ?? null;
+  const semanticMatches = profiles.filter(profile => profileMatchesTokens(profile, wanted));
+  const profile = mapped ?? semanticMatches[0] ?? referenced ?? randomChoice(profiles);
+
+  if (profile && ((referenced && referenced.id !== profile.id) || (wanted.length && !profileMatchesTokens(profile, wanted)))) {
+    console.warn(`${MODULE_ID} | Official table/profile mismatch sanitized`, {
+      item: item.name,
+      tableUuid,
+      tableResult: outcome.description,
+      referencedProfile: referenced?.name ?? null,
+      selectedProfile: profile.name,
+      wanted
+    });
+  }
+  return { profile, outcome };
+}
+
+function previewResolvedReadyName(item, resolution) {
+  const base = String(item?.name ?? i18n("EMI.Common.UnnamedItem"));
+  if (!resolution) return base;
+  if (resolution.previewName) return resolution.previewName;
+  if (resolution.damageType && /armor of resistance$/i.test(base)) {
+    return base.replace(/armor of resistance$/i, `Armor of ${titleCase(resolution.damageType)} Resistance`);
+  }
+  if (resolution.damageType && normalizeName(base) === "potion of resistance") {
+    return `Potion of ${titleCase(resolution.damageType)} Resistance`;
+  }
+  return base;
+}
+
+function randomDie(sides) {
+  return Math.floor(Math.random() * Math.max(1, Number(sides) || 1)) + 1;
+}
+
+function roll4d4() {
+  return randomDie(4) + randomDie(4) + randomDie(4) + randomDie(4);
+}
+
+function choiceToken(tokens, prefix) {
+  return tokens.find(token => token.startsWith(`${prefix}:`))?.slice(prefix.length + 1) ?? null;
+}
+
+function activitySemanticTokens(activity) {
+  const spellUuid = String(activity?.spell?.uuid ?? "");
+  return semanticTokensFromText(`${activity?.name ?? ""} ${spellUuid}`);
+}
+
+function tableOutcomeLabel(outcome) {
+  if (!outcome) return "";
+  const html = stripFoundryLinks(outcome.description)
+    .replace(/<br\s*\/?>/gi, " | ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return html;
+}
+
+function compactTableOutcome(outcome) {
+  if (!outcome) return null;
+  return {
+    tableUuid: outcome.tableUuid ?? null,
+    rollTotal: Number.isFinite(Number(outcome.rollTotal)) ? Number(outcome.rollTotal) : null,
+    resultId: outcome.resultId ?? null,
+    description: outcome.description ?? "",
+    range: foundry.utils.deepClone(outcome.range ?? null)
+  };
+}
+
+function rollInitialQuantity(mode) {
+  if (mode === "bag-beans") return randomDie(4) + randomDie(4) + randomDie(4);
+  if (mode === "deck-illusions") return 34 - (randomDie(20) - 1);
+  if (mode === "d6-plus-1") return randomDie(6) + 1;
+  if (mode === "deck-many-things") return Math.random() < 0.75 ? 13 : 22;
+  return null;
+}
+
+function prayerChoiceFromOutcome(outcome) {
+  const tokens = semanticTokensFromText(outcome?.description ?? "");
+  const bead = choiceToken(tokens, "bead");
+  const spellRef = referencedItemUuids(outcome?.description ?? "").find(ref => /\.spells(?:24)?\.Item\./i.test(ref.uuid));
+  return bead ? { bead, spellUuid: spellRef?.uuid ?? null, label: `Bead of ${titleCase(bead.replaceAll("-", " "))}` } : null;
+}
+
+function robePatchLabel(outcome) {
+  let label = tableOutcomeLabel(outcome);
+  if (!label) return "";
+  label = label
+    .replace(/\s*\|\s*/g, " — ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return label;
+}
+
+async function reserveReadyResolution(item) {
+  const spec = item?.resolutionSpec;
+  if (!spec || item.materializationMode === "template") return null;
+
+  if (spec.kind === "effect-table" || spec.kind === "legacy-resistance") {
+    const outcome = await rollResolutionTable(spec.tableUuid);
+    const damageType = choiceToken(semanticTokensFromText(outcome?.description ?? ""), "damage")
+      ?? DAMAGE_TYPES.find(type => new RegExp(`\\b${type}\\b`, "i").test(tableOutcomeLabel(outcome)));
+    if (!damageType) throw new Error(`EasyMagicItems could not resolve the damage type for ${item.name}.`);
+    const resolution = { kind: spec.kind, status: "reserved", damageType, tableOutcome: compactTableOutcome(outcome) };
+    resolution.previewName = previewResolvedReadyName(item, resolution);
+    return resolution;
+  }
+
+  if (spec.kind === "legacy-vulnerability") {
+    const damageType = randomChoice(PHYSICAL_DAMAGE_TYPES);
+    return {
+      kind: spec.kind,
+      status: "reserved",
+      damageType,
+      previewName: `${item.name} — ${titleCase(damageType)} Resistance`
+    };
+  }
+
+  if (spec.kind === "legacy-dragon-scale") {
+    const variant = foundry.utils.deepClone(randomChoice(DRAGON_VARIANTS));
+    return {
+      kind: spec.kind,
+      status: "reserved",
+      dragon: variant.key,
+      damageType: variant.damage,
+      previewName: `${titleCase(variant.key)} Dragon Scale Mail`
+    };
+  }
+
+  if (spec.kind === "activity-table") {
+    const outcome = await rollResolutionTable(spec.tableUuid);
+    const tokens = semanticTokensFromText(outcome?.description ?? "");
+    const label = tableOutcomeLabel(outcome);
+    return { kind: spec.kind, selector: spec.selector, status: "reserved", tokens, label, tableOutcome: compactTableOutcome(outcome) };
+  }
+
+  if (spec.kind === "legacy-manual") {
+    const outcome = await rollResolutionTable(spec.tableUuid);
+    let golem = choiceToken(semanticTokensFromText(outcome?.description ?? ""), "golem");
+    if (!golem && Number.isFinite(outcome?.rollTotal)) {
+      const total = Number(outcome.rollTotal);
+      golem = total <= 5 ? "clay" : total <= 17 ? "flesh" : total === 18 ? "iron" : "stone";
+    }
+    if (!golem) throw new Error(`EasyMagicItems could not resolve the golem type for ${item.name}.`);
+    return { kind: spec.kind, status: "reserved", golem, tableOutcome: compactTableOutcome(outcome), previewName: `${item.name} (${titleCase(golem)} Golem)` };
+  }
+
+  if (spec.kind === "replacement-choice") {
+    const choice = randomChoice(spec.choices ?? []);
+    if (!choice?.uuid) throw new Error(`EasyMagicItems could not resolve a concrete form for ${item.name}.`);
+    return { kind: spec.kind, status: "reserved", replacementUuid: choice.uuid, previewName: choice.label || item.name };
+  }
+
+  if (spec.kind === "prayer-beads") {
+    const count = randomDie(4) + 2;
+    const choices = [];
+    for (let i = 0; i < count; i += 1) {
+      const outcome = await rollResolutionTable(spec.tableUuid);
+      const choice = prayerChoiceFromOutcome(outcome);
+      if (!choice) throw new Error(`EasyMagicItems could not resolve prayer bead ${i + 1}.`);
+      choices.push(choice);
+    }
+    const counts = {};
+    for (const choice of choices) counts[choice.bead] = (counts[choice.bead] ?? 0) + 1;
+    return { kind: spec.kind, status: "reserved", count, choices, counts, previewName: item.name };
+  }
+
+  if (spec.kind === "robe-patches") {
+    const extraCount = roll4d4();
+    const patches = [];
+    for (let i = 0; i < extraCount; i += 1) {
+      const outcome = await rollResolutionTable(spec.tableUuid);
+      if (!outcome) throw new Error(`EasyMagicItems could not resolve robe patch ${i + 1}.`);
+      let label = robePatchLabel(outcome);
+      if (!label) throw new Error(`EasyMagicItems received an empty Robe of Useful Items table result for ${item.name}.`);
+      if (/spell scroll/i.test(label)) {
+        const spells = (catalogCache?.spells ?? []).filter(spell => spell.level >= 1 && spell.level <= 3);
+        const spell = randomChoice(spells);
+        if (!spell) throw new Error(`EasyMagicItems could not resolve the spell scroll patch for ${item.name}.`);
+        label = `Spell Scroll of ${spell.name}`;
+      }
+      patches.push({ label, tableOutcome: compactTableOutcome(outcome) });
+    }
+    const counts = {};
+    for (const patch of patches) counts[patch.label] = (counts[patch.label] ?? 0) + 1;
+    return { kind: spec.kind, status: "reserved", extraCount, patches, counts, previewName: item.name };
+  }
+
+  if (spec.kind === "initial-quantity") {
+    const count = rollInitialQuantity(spec.mode);
+    if (!Number.isFinite(count) || count < 1) throw new Error(`EasyMagicItems could not determine the starting quantity for ${item.name}.`);
+    return {
+      kind: spec.kind,
+      status: "reserved",
+      mode: spec.mode,
+      unit: spec.unit ?? "uses",
+      count,
+      removeActivity: spec.removeActivity ?? null,
+      previewName: item.name
+    };
+  }
+
+  if (spec.kind === "legacy-candle") {
+    const outcome = await rollResolutionTable(spec.tableUuid);
+    const alignment = tableOutcomeLabel(outcome);
+    if (!alignment) throw new Error(`EasyMagicItems could not determine the alignment for ${item.name}.`);
+    return {
+      kind: spec.kind,
+      status: "reserved",
+      alignment,
+      tableOutcome: compactTableOutcome(outcome),
+      previewName: `${item.name} (${alignment})`
+    };
+  }
+
+  return null;
+}
+
+async function reserveVariant(item, filters = {}) {
+  const reserved = foundry.utils.deepClone(item);
+
+  if (reserved.materializationMode === "template" && reserved.profiles?.length) {
+    const profiles = selectableProfiles(reserved, filters.rarities ?? []);
+    const candidates = profiles.length ? profiles : reserved.profiles;
+    let selectedProfile = null;
+    let tableOutcome = null;
+    if (reserved.resolutionSpec?.kind === "profile-table" && reserved.resolutionSpec?.tableUuid) {
+      const selected = await selectProfileFromOfficialTable(reserved, candidates, reserved.resolutionSpec.tableUuid);
+      selectedProfile = selected.profile;
+      tableOutcome = selected.outcome;
+    } else {
+      selectedProfile = randomChoice(candidates);
+    }
+    if (selectedProfile) {
+      reserved.selectedProfileId = selectedProfile.id;
+      reserved.selectedProfileName = selectedProfile.name;
+      reserved.selectedProfileRiders = foundry.utils.deepClone(selectedProfile.riders ?? {});
+      reserved.selectedProfileSemantics = foundry.utils.deepClone(selectedProfile.primarySemantics?.length ? selectedProfile.primarySemantics : selectedProfile.semantics ?? []);
+      const rarity = profileEffectiveRarity(reserved, selectedProfile);
+      if (rarity) {
+        reserved.rarity = rarity;
+        reserved.rarityLabel = rarityLabel(rarity);
+      }
+      reserved.requiresAttunement = Boolean(reserved.requiresAttunement || selectedProfile.requiresAttunement);
+      reserved.resolution = {
+        kind: reserved.resolutionSpec?.kind ?? "template",
+        status: "reserved",
+        selectedProfileId: selectedProfile.id,
+        selectedProfileName: selectedProfile.name,
+        selectedProfileSemantics: foundry.utils.deepClone(reserved.selectedProfileSemantics),
+        tableOutcome: compactTableOutcome(tableOutcome)
+      };
+    }
+    return reserved;
+  }
+
+  const resolution = await reserveReadyResolution(reserved);
+  if (resolution) {
+    reserved.resolution = resolution;
+    reserved.name = resolution.previewName || reserved.name;
+  }
+  return reserved;
+}
+
+async function reserveRandomItem(session, tokenUuid) {
   const candidates = viableCandidates(session, tokenUuid);
   const selected = randomChoice(candidates);
   if (!selected) return null;
+  const reserved = await reserveVariant(selected, session.participantFilters?.[tokenUuid] ?? {});
   session.reserved ??= {};
-  session.reserved[tokenUuid] = selected;
-  return selected;
+  session.reserved[tokenUuid] = reserved;
+  return reserved;
 }
 
 function parseScrollLevel(item) {
@@ -574,43 +1457,16 @@ function parseScrollLevel(item) {
   return match[1].toLowerCase() === "cantrip" ? 0 : Number.parseInt(match[1], 10);
 }
 
-function getEnchantmentEffects(document) {
-  return [...(document?.effects ?? [])].filter(effect => effect.type === "enchantment" || effect.system?.type === "enchantment");
+function isMagicItemTemplateDocument(document) {
+  return Boolean(getSetupEnchantActivityData(document));
 }
 
 function isWeaponTemplateDocument(document) {
-  if (document?.type !== "weapon") return false;
-  if (getEnchantmentEffects(document).length > 0) return true;
-
-  // Some official D&D5e indexes/documents do not expose the enchantment type
-  // consistently. Treat clearly generic weapon templates as two-stage items,
-  // while leaving ordinary fixed-form magic weapons untouched.
-  const baseItem = String(getValue(document, "system.type.baseItem", ""));
-  const text = weaponCompatibilityText(document);
-  if (!baseItem && /weapon\s*\((?:any|a |simple|martial|sword|bow|crossbow|melee|ranged)/i.test(text)) return true;
-  if (/make magical items with templates|template item|apply the enchantment|drag your effect onto/i.test(text)) return true;
-  return false;
+  return document?.type === "weapon" && isMagicItemTemplateDocument(document);
 }
 
-/**
- * Index-safe version of the template test. Weapon results are intentionally
- * limited to enchantment templates: pre-materialized legacy variants such as
- * Older already-shaped variants would otherwise bypass the second roll and
- * appear alongside their modern generic enchantment templates.
- */
 function isWeaponTemplateEntry(entry) {
-  if (entry?.category !== "weapon" && entry?.documentType !== "weapon") return false;
-  const baseItem = String(entry?.baseItem ?? "");
-  const text = normalizeName(plainTextFromHtml(entry?.description ?? "").slice(0, 900));
-  if (baseItem) return false;
-  const templateCue = /make magical items with templates|template item|apply the enchantment|drag your effect onto/i.test(text);
-  const form = text.match(/weapon\s*\(([^)]+)\)/i)?.[1] ?? "";
-  const fixedSingleForm = form && !/(?:any|simple|martial| or |,|sword|axe|bow|crossbow|melee|ranged)/i.test(form);
-  if (fixedSingleForm && !templateCue) return false;
-  if (entry?.enchantmentTemplate) return true;
-  if (/weapon\s*\((?:any|a |simple|martial|sword|axe|bow|crossbow|melee|ranged)/i.test(text)) return true;
-  if (templateCue) return true;
-  return false;
+  return entry?.category === "weapon" && entry?.materializationMode === "template";
 }
 
 function plainTextFromHtml(html) {
@@ -619,59 +1475,111 @@ function plainTextFromHtml(html) {
   return element.textContent ?? "";
 }
 
-function weaponCompatibilityText(source) {
+function compatibilityText(source) {
   const html = source?.description ?? String(getValue(source, "system.description.value", ""));
-  return normalizeName(plainTextFromHtml(html).slice(0, 900));
+  return normalizeName(plainTextFromHtml(html).slice(0, 1100));
 }
 
-function compatibleBaseWeapons(templateDocument, baseWeapons, { fallback = true } = {}) {
-  const text = weaponCompatibilityText(templateDocument);
-  // Official 2024 templates often enumerate valid base weapons directly in
-  // the opening "Weapon (...)" line. When at least two known weapon names are
-  // present, treat that list as authoritative instead of relying on broad
-  // family heuristics.
-  const explicitlyNamed = baseWeapons.filter(weapon => {
-    const name = normalizeName(weapon.name);
-    const baseName = normalizeName(weapon.baseItem);
-    return (name && text.includes(name)) || (baseName && baseName.length > 3 && text.includes(baseName));
-  });
-  if (explicitlyNamed.length >= 2) return explicitlyNamed;
-  const allowed = baseWeapons.filter(weapon => {
-    const name = normalizeName(weapon.name);
-    const props = new Set(weapon.properties ?? []);
-    if (/any sword|sword/.test(text) && !name.includes("sword") && !["rapier", "scimitar"].includes(weapon.baseItem)) return false;
-    if (/bow/.test(text) && !name.includes("bow")) return false;
-    if (/crossbow/.test(text) && !name.includes("crossbow")) return false;
-    if (/melee weapon/.test(text) && ["simpleR", "martialR"].includes(weapon.subtype)) return false;
-    if (/ranged weapon/.test(text) && !["simpleR", "martialR"].includes(weapon.subtype)) return false;
-    if (/slashing/.test(text) && !props.has("slashing") && !["longsword","shortsword","greatsword","scimitar","glaive","halberd","greataxe","battleaxe","handaxe"].includes(weapon.baseItem)) return false;
-    return true;
-  });
-  return allowed.length || !fallback ? allowed : baseWeapons;
+function sourceCategory(source) {
+  if (source?.category) return source.category;
+  return categorize(source, { setupActivity: getSetupEnchantActivityData(source) });
+}
+
+function sourceBaseItem(source) {
+  return String(source?.baseItem ?? getValue(source, "system.type.baseItem", ""));
+}
+
+function sourceExplicitBaseUuids(source) {
+  if (Array.isArray(source?.explicitBaseUuids) && source.explicitBaseUuids.length) return source.explicitBaseUuids;
+  const description = source?.description ?? String(getValue(source, "system.description.value", ""));
+  // Base forms are declared in the opening rules line. Limiting the scan keeps
+  // later references (e.g. Belt of Giant Strength) from becoming base choices.
+  return extractUuidReferences(String(description).slice(0, 1000)).map(ref => ref.uuid);
+}
+
+function baseCandidateMatchesCategory(base, category) {
+  if (category === "weapon" || category === "staff") return base.documentType === "weapon";
+  if (category === "armor") return base.documentType === "equipment" && ["light", "medium", "heavy", "natural"].includes(base.subtype);
+  if (category === "shield") return base.documentType === "equipment" && base.subtype === "shield";
+  if (category === "ammunition") return base.documentType === "consumable" && base.subtype === "ammo";
+  if (category === "wand") return base.documentType === "equipment" && (/wand/.test(normalizeName(base.name)) || ["wand", "trinket"].includes(base.subtype));
+  if (category === "ring") return base.documentType === "equipment" && (/ring/.test(normalizeName(base.name)) || base.subtype === "ring");
+  if (category === "rod") return base.documentType === "equipment" && (/rod/.test(normalizeName(base.name)) || base.subtype === "rod");
+  return true;
+}
+
+function compatibleBaseItems(template, baseItems, { fallback = true } = {}) {
+  const category = sourceCategory(template);
+  const text = compatibilityText(template);
+  let candidates = baseItems.filter(base => baseCandidateMatchesCategory(base, category));
+  if (!candidates.length) return [];
+
+  const explicit = new Set(sourceExplicitBaseUuids(template));
+  if (explicit.size) {
+    const exact = candidates.filter(base => explicit.has(base.uuid));
+    if (exact.length) return exact;
+  }
+
+  const baseItem = sourceBaseItem(template);
+  if (baseItem) {
+    const exactBase = candidates.filter(base => base.baseItem === baseItem);
+    if (exactBase.length) return exactBase;
+  }
+
+  if (category === "weapon" || category === "staff") {
+    const allowed = candidates.filter(weapon => {
+      const name = normalizeName(weapon.name);
+      const props = new Set((weapon.properties ?? []).map(normalizeName));
+      if (/any sword|\bsword\b/.test(text) && !name.includes("sword") && !["rapier", "scimitar"].includes(weapon.baseItem)) return false;
+      if (/\bbow\b/.test(text) && !name.includes("bow")) return false;
+      if (/crossbow/.test(text) && !name.includes("crossbow")) return false;
+      if (/melee weapon/.test(text) && ["simpleR", "martialR"].includes(weapon.subtype)) return false;
+      if (/ranged weapon/.test(text) && !["simpleR", "martialR"].includes(weapon.subtype)) return false;
+      if (/simple weapon/.test(text) && !String(weapon.subtype).startsWith("simple")) return false;
+      if (/martial weapon/.test(text) && !String(weapon.subtype).startsWith("martial")) return false;
+      if (/slashing/.test(text) && !props.has("slashing") && !["longsword","shortsword","greatsword","scimitar","glaive","halberd","greataxe","battleaxe","handaxe"].includes(weapon.baseItem)) return false;
+      return true;
+    });
+    return allowed.length || !fallback ? allowed : candidates;
+  }
+
+  if (category === "armor") {
+    const allowed = candidates.filter(armor => {
+      if (/any medium or heavy/.test(text) && !["medium", "heavy"].includes(armor.subtype)) return false;
+      if (/any light, medium, or heavy|any light medium or heavy/.test(text) && !["light", "medium", "heavy"].includes(armor.subtype)) return false;
+      if (/\blight armor\b/.test(text) && armor.subtype !== "light") return false;
+      if (/\bmedium armor\b/.test(text) && armor.subtype !== "medium") return false;
+      if (/\bheavy armor\b/.test(text) && armor.subtype !== "heavy") return false;
+      if (/except hide armor|except hide/.test(text) && armor.baseItem === "hide") return false;
+      return true;
+    });
+    return allowed.length || !fallback ? allowed : candidates;
+  }
+
+  return candidates;
+}
+
+function compatibleBaseWeapons(template, baseWeapons, { fallback = true } = {}) {
+  return compatibleBaseItems(template, baseWeapons, { fallback });
 }
 
 function itemAllowsSelectedWeapon(item, selectedWeaponUuid) {
   if (!selectedWeaponUuid || selectedWeaponUuid === "random" || item.category !== "weapon") return true;
   const base = (catalogCache?.baseWeapons ?? []).find(weapon => weapon.uuid === selectedWeaponUuid);
   if (!base) return false;
-  // A generic 2024 enchantment template is eligible only when the chosen base
-  // weapon satisfies its official compatibility text.
   if (isWeaponTemplateEntry(item)) {
-    // Resolve compatibility against the complete base-weapon catalog first.
-    // Passing only the chosen weapon would hide explicit lists such as
-    // “Battleaxe, Greataxe, or Halberd” and incorrectly accept Greatsword.
     return compatibleBaseWeapons(item, catalogCache?.baseWeapons ?? [], { fallback: false })
       .some(weapon => weapon.uuid === base.uuid);
   }
-  return false;
+  // Fixed-form magic weapons stay in the pool. A specific GM base choice only
+  // keeps fixed-form weapons whose canonical base matches that choice.
+  return Boolean(item.baseItem && base.baseItem && item.baseItem === base.baseItem);
 }
 
 function spellMatchesPreference(spell, preference, level) {
   if (spell.level !== level) return false;
   if (preference?.spellSchool && preference.spellSchool !== "random" && spell.school !== preference.spellSchool) return false;
   if (preference?.spellClass && preference.spellClass !== "random") {
-    // Older official indexes do not always expose class lists. In that case,
-    // keep the spell eligible rather than creating an empty pool.
     if (spell.classes?.length && !spell.classes.includes(preference.spellClass)) return false;
   }
   return true;
@@ -728,6 +1636,12 @@ class MagicItemDrawApplication extends Application {
       const rawResult = session.results?.[participant.tokenUuid] ?? null;
       const result = rawResult ? { ...rawResult, rarityLabel: rarityLabel(rawResult.rarity), categoryLabel: categoryLabel(rawResult.category) } : null;
       const revealing = (session.revealing ?? []).includes(participant.tokenUuid);
+      const preference = finalPreference(session, participant.tokenUuid);
+      const baseChoice = preference.itemBase ?? (result?.category === "weapon" ? preference.weaponBase : "random") ?? "random";
+      const finalKindTemplate = result?.finalKind === "template" || result?.finalKind === "weapon";
+      const templateButtonLabel = result?.category === "weapon"
+        ? i18n("EMI.Main.RollWeaponType")
+        : i18n("EMI.Main.RollItemForm", "Roll Item Form");
       participants.push({
         ...participant,
         result,
@@ -740,12 +1654,15 @@ class MagicItemDrawApplication extends Application {
         canDraw: introComplete && !result && !revealing && (game.user.isGM || (actor?.isOwner && session.rollPermissions?.[participant.tokenUuid])),
         canOpenItem: Boolean(result) && !resultNeedsFinalization(result),
         canFinalize: Boolean(result?.pendingFinal) && !revealing && (game.user.isGM || actor?.isOwner),
-        finalButtonLabel: result?.finalKind === "weapon" ? i18n("EMI.Main.RollWeaponType") : i18n("EMI.Main.RollSpell"),
-        finalKindWeapon: result?.finalKind === "weapon",
+        finalButtonLabel: result?.finalKind === "scroll" ? i18n("EMI.Main.RollSpell") : templateButtonLabel,
+        finalKindTemplate,
+        finalKindWeapon: result?.finalKind === "weapon" || (finalKindTemplate && result?.category === "weapon"),
         finalKindScroll: result?.finalKind === "scroll",
-        weaponOptions: (result?.weaponOptions ?? []).map(option => ({ ...option, selected: finalPreference(session, participant.tokenUuid).weaponBase === option.value })),
-        spellClassOptions: SPELL_CLASSES.map(value => ({ value, label: classLabel(value), selected: finalPreference(session, participant.tokenUuid).spellClass === value })),
-        spellSchoolOptions: SPELL_SCHOOLS.map(value => ({ value, label: schoolLabel(value), selected: finalPreference(session, participant.tokenUuid).spellSchool === value })),
+        baseLabel: result?.baseLabel ?? baseOptionLabel(result?.category),
+        baseOptions: (result?.baseOptions ?? result?.weaponOptions ?? []).map(option => ({ ...option, selected: baseChoice === option.value })),
+        weaponOptions: (result?.weaponOptions ?? []).map(option => ({ ...option, selected: baseChoice === option.value })),
+        spellClassOptions: SPELL_CLASSES.map(value => ({ value, label: classLabel(value), selected: preference.spellClass === value })),
+        spellSchoolOptions: SPELL_SCHOOLS.map(value => ({ value, label: schoolLabel(value), selected: preference.spellSchool === value })),
         drawDisabled: viableCandidates(session, participant.tokenUuid).length < 1,
         rollReleased: Boolean(session.rollPermissions?.[participant.tokenUuid]),
         canConfigure: game.user.isGM,
@@ -793,6 +1710,7 @@ class MagicItemDrawApplication extends Application {
         class: i18n("EMI.Common.Class"),
         school: i18n("EMI.Common.School"),
         randomWeapon: i18n("EMI.Filter.RandomCompatibleWeapon"),
+        randomBase: i18n("EMI.Filter.RandomCompatibleItem", "Random compatible form"),
         randomClass: i18n("EMI.Filter.RandomClass"),
         randomSchool: i18n("EMI.Filter.RandomSchool"),
         resetResult: i18n("EMI.Main.ResetResult")
@@ -1367,20 +2285,447 @@ async function gmReroll(sessionId, tokenUuid) {
   await syncSession(session, "reroll");
 }
 
-async function createItemForParticipant(session, tokenUuid, itemData, sourceUuid) {
+function randomDocumentId() {
+  if (typeof foundry?.utils?.randomID === "function") return foundry.utils.randomID(16);
+  return Math.random().toString(36).slice(2, 18).padEnd(16, "0").slice(0, 16);
+}
+
+function itemActivityData(itemData) {
+  const raw = getValue(itemData, "system.activities", {});
+  return collectionValues(raw);
+}
+
+function setItemActivities(itemData, activities) {
+  const current = getValue(itemData, "system.activities", {});
+  if (Array.isArray(current)) {
+    foundry.utils.setProperty(itemData, "system.activities", activities);
+    return;
+  }
+  const object = {};
+  for (const activity of activities) {
+    const id = String(activity?._id ?? activity?.id ?? randomDocumentId());
+    activity._id = id;
+    object[id] = activity;
+  }
+  foundry.utils.setProperty(itemData, "system.activities", object);
+}
+
+function setActivityEffects(activity, effectIds) {
+  if (!activity || !("effects" in activity)) return;
+  const current = collectionValues(activity.effects);
+  activity.effects = current.filter(ref => effectIds.includes(String(ref?._id ?? ref?.id ?? ref ?? "")));
+}
+
+function appendResolutionSummary(itemData, title, lines = []) {
+  const clean = lines.filter(Boolean);
+  if (!clean.length) return;
+  const current = String(getValue(itemData, "system.description.value", ""));
+  const list = clean.map(line => `<li>${escapeHtml(line)}</li>`).join("");
+  const section = `<hr><section class="easy-magic-items-resolution"><h3>${escapeHtml(title)}</h3><ul>${list}</ul></section>`;
+  foundry.utils.setProperty(itemData, "system.description.value", `${current}${section}`);
+}
+
+function createTraitEffectData(name, changes, img = "icons/svg/aura.svg") {
+  return {
+    _id: randomDocumentId(),
+    name,
+    img,
+    type: "base",
+    disabled: false,
+    transfer: true,
+    system: {
+      changes: changes.map(change => ({
+        key: String(change.key),
+        value: String(change.value),
+        priority: null,
+        type: change.type ?? "add",
+        phase: change.phase ?? "initial"
+      }))
+    },
+    duration: { value: null, units: "seconds", expiry: null, expired: false },
+    description: "",
+    origin: null,
+    tint: "#ffffff",
+    statuses: [],
+    flags: {},
+    sort: 0
+  };
+}
+
+function sanitizeDamageChangesInData(itemData) {
+  for (const effect of collectionValues(itemData?.effects ?? [])) {
+    const paths = [];
+    if (Array.isArray(effect?.system?.changes)) paths.push(effect.system.changes);
+    if (Array.isArray(effect?.changes)) paths.push(effect.changes);
+    for (const changes of paths) {
+      for (const change of changes) {
+        if (!["system.traits.dr.value", "system.traits.dv.value", "system.traits.di.value"].includes(String(change?.key ?? ""))) continue;
+        const canonical = normalizeDamageType(change?.value);
+        if (canonical) change.value = canonical;
+      }
+    }
+  }
+  return itemData;
+}
+
+function beadTypeForActivity(activity, resolution) {
+  const direct = choiceToken(activitySemanticTokens(activity), "bead");
+  if (direct) return direct;
+  const spellUuid = String(activity?.spell?.uuid ?? "");
+  if (!spellUuid) return null;
+  const match = (resolution?.choices ?? []).find(choice => choice.spellUuid && choice.spellUuid === spellUuid);
+  return match?.bead ?? null;
+}
+
+function resolvedActivityName(bead) {
+  return `Bead of ${titleCase(String(bead ?? "").replaceAll("-", " "))}`;
+}
+
+function makeUtilityActivity(label, count, template = null) {
+  const activity = foundry.utils.deepClone(template ?? {
+    type: "utility",
+    sort: 0,
+    activation: { type: "action", value: null, override: false, condition: "" },
+    consumption: { scaling: { allowed: false }, spellSlot: true, targets: [{ type: "activityUses", value: "1", scaling: {} }] },
+    description: { chatFlavor: "" },
+    duration: { units: "inst", concentration: false, override: false },
+    effects: [],
+    range: { override: false, units: "self", special: "" },
+    target: { template: { contiguous: false, units: "ft", type: "", stationary: false }, affects: { choice: false, count: "", type: "" }, override: false, prompt: true },
+    visibility: { requireMagic: true, level: { min: null, max: null }, identifier: "", requireAttunement: false, requireIdentification: false },
+    flags: {}
+  });
+  activity._id = randomDocumentId();
+  activity.name = label;
+  activity.type = "utility";
+  activity.uses = { ...(activity.uses ?? {}), spent: 0, recovery: [], max: String(count) };
+  activity.consumption ??= { scaling: { allowed: false }, spellSlot: true, targets: [] };
+  activity.consumption.targets = [{ type: "activityUses", value: "1", scaling: {} }];
+  activity.effects = [];
+  return activity;
+}
+
+function resolutionFlag(reserved, resolution, complete) {
+  return {
+    required: true,
+    complete: Boolean(complete),
+    kind: String(resolution?.kind ?? reserved?.resolutionSpec?.kind ?? reserved?.materializationMode ?? "unknown"),
+    sourceUuid: reserved?.uuid ?? null,
+    choice: foundry.utils.deepClone(resolution ?? null)
+  };
+}
+
+function stampResolution(itemData, reserved, resolution, complete = true) {
+  itemData.flags = foundry.utils.mergeObject(itemData.flags ?? {}, {
+    [MODULE_ID]: { resolution: resolutionFlag(reserved, resolution, complete) }
+  }, { inplace: false });
+  return itemData;
+}
+
+function resolutionSourceEntry(sourceUuid) {
+  return (catalogCache?.items ?? []).find(item => item.uuid === sourceUuid) ?? null;
+}
+
+function assertGrantResolution(sourceUuid, options = {}) {
+  const source = resolutionSourceEntry(sourceUuid);
+  if (!source?.resolutionRequired) return;
+  if (options.staging) return;
+  if (!options.resolutionComplete) {
+    throw new Error(`EasyMagicItems blocked an unresolved magic item from being delivered: ${source.name}.`);
+  }
+}
+
+function matchActivityForResolution(activity, resolution) {
+  const tokens = new Set(activitySemanticTokens(activity));
+  const nameTokens = new Set(semanticTokensFromText(activity?.name ?? ""));
+  for (const wanted of resolution?.tokens ?? []) {
+    if (tokens.has(wanted) || nameTokens.has(wanted)) return true;
+  }
+  if (resolution?.selector === "golem" && resolution?.label) {
+    const wanted = choiceToken(semanticTokensFromText(resolution.label), "golem");
+    if (wanted && (tokens.has(`golem:${wanted}`) || nameTokens.has(`golem:${wanted}`))) return true;
+  }
+  if (resolution?.selector === "size" && resolution?.label) {
+    const wanted = choiceToken(semanticTokensFromText(resolution.label), "size");
+    if (wanted && (tokens.has(`size:${wanted}`) || nameTokens.has(`size:${wanted}`))) return true;
+  }
+  return false;
+}
+
+async function resolveReadyItemData(sourceDocument, reserved) {
+  if (!sourceDocument) throw new Error(i18n("EMI.Error.ItemSheetLoad"));
+  const resolution = foundry.utils.deepClone(reserved?.resolution ?? null);
+  const spec = reserved?.resolutionSpec;
+  if (!spec || !resolution) {
+    if (reserved?.resolutionRequired) throw new Error(`EasyMagicItems could not resolve ${reserved.name} before delivery.`);
+    return { data: sourceDocument.toObject(), resolution: null, name: sourceDocument.name, img: sourceDocument.img };
+  }
+
+  if (spec.kind === "replacement-choice") {
+    const replacement = await fromUuid(resolution.replacementUuid);
+    if (!replacement || replacement.documentName !== "Item") throw new Error(`EasyMagicItems could not load the resolved form of ${reserved.name}.`);
+    const data = replacement.toObject();
+    appendResolutionSummary(data, "EasyMagicItems Resolution", [`Resolved form: ${replacement.name}`]);
+    sanitizeDamageChangesInData(data);
+    resolution.status = "validated";
+    stampResolution(data, reserved, resolution, true);
+    return { data, resolution, name: replacement.name, img: replacement.img };
+  }
+
+  const data = sourceDocument.toObject();
+  let finalName = resolution.previewName || data.name || reserved.name;
+
+  if (spec.kind === "effect-table") {
+    const effects = collectionValues(data.effects ?? []);
+    const wanted = `damage:${resolution.damageType}`;
+    const selected = effects.find(effect => semanticTokensFromEffect(effect, effects).includes(wanted));
+    if (!selected) throw new Error(`EasyMagicItems could not find the ${resolution.damageType} effect for ${reserved.name}.`);
+    data.effects = [selected];
+    for (const activity of itemActivityData(data)) setActivityEffects(activity, [String(selected._id ?? selected.id)]);
+    finalName = resolution.previewName || `Potion of ${titleCase(resolution.damageType)} Resistance`;
+    data.name = finalName;
+    appendResolutionSummary(data, "Resolved Resistance", [`Damage type: ${titleCase(resolution.damageType)}`]);
+  }
+
+  if (spec.kind === "activity-table") {
+    const activities = itemActivityData(data);
+    const selected = activities.find(activity => matchActivityForResolution(activity, resolution));
+    if (!selected) throw new Error(`EasyMagicItems could not identify the selected ${spec.selector} activity for ${reserved.name}.`);
+    setItemActivities(data, [selected]);
+    const tokens = semanticTokensFromText(`${resolution.label} ${selected.name ?? ""}`);
+    if (spec.selector === "size") {
+      const size = choiceToken(tokens, "size");
+      finalName = size ? `Carpet of Flying (${size.replace("x", " × ")} ft.)` : `${reserved.name} (${resolution.label})`;
+      appendResolutionSummary(data, "Resolved Carpet Size", [resolution.label || selected.name]);
+    } else if (spec.selector === "golem") {
+      const golem = choiceToken(tokens, "golem");
+      finalName = golem ? `${reserved.name} (${titleCase(golem)} Golem)` : `${reserved.name} (${resolution.label})`;
+      appendResolutionSummary(data, "Resolved Golem Type", [resolution.label || selected.name]);
+    }
+    data.name = finalName;
+  }
+
+  if (spec.kind === "legacy-manual") {
+    finalName = resolution.previewName || `${reserved.name} (${titleCase(resolution.golem)} Golem)`;
+    data.name = finalName;
+    appendResolutionSummary(data, "Resolved Golem Type", [`${titleCase(resolution.golem)} Golem`]);
+  }
+
+  if (spec.kind === "legacy-resistance") {
+    const type = normalizeDamageType(resolution.damageType);
+    if (!type) throw new Error(`EasyMagicItems could not validate the resistance type for ${reserved.name}.`);
+    const effect = createTraitEffectData(`${titleCase(type)} Resistance`, [{ key: "system.traits.dr.value", value: type }], `systems/dnd5e/icons/svg/damage/${type}.svg`);
+    data.effects = [...collectionValues(data.effects ?? []), effect];
+    finalName = resolution.previewName || previewResolvedReadyName(reserved, resolution);
+    data.name = finalName;
+    appendResolutionSummary(data, "Resolved Resistance", [`Damage type: ${titleCase(type)}`]);
+  }
+
+  if (spec.kind === "legacy-vulnerability") {
+    const type = normalizeDamageType(resolution.damageType);
+    if (!PHYSICAL_DAMAGE_TYPES.includes(type)) throw new Error(`EasyMagicItems could not validate the vulnerability armor type for ${reserved.name}.`);
+    const other = PHYSICAL_DAMAGE_TYPES.filter(candidate => candidate !== type);
+    const effect = createTraitEffectData(
+      `Armor of Vulnerability — ${titleCase(type)} Resistance`,
+      [
+        { key: "system.traits.dr.value", value: type },
+        ...other.map(value => ({ key: "system.traits.dv.value", value }))
+      ],
+      `systems/dnd5e/icons/svg/damage/${type}.svg`
+    );
+    data.effects = [...collectionValues(data.effects ?? []), effect];
+    finalName = resolution.previewName || `${reserved.name} — ${titleCase(type)} Resistance`;
+    data.name = finalName;
+    appendResolutionSummary(data, "Resolved Damage Type", [
+      `Resistance: ${titleCase(type)}`,
+      `Curse vulnerability: ${other.map(titleCase).join(", ")}`
+    ]);
+  }
+
+  if (spec.kind === "legacy-dragon-scale") {
+    const type = normalizeDamageType(resolution.damageType);
+    if (!type || !resolution.dragon) throw new Error(`EasyMagicItems could not validate the dragon type for ${reserved.name}.`);
+    const effect = createTraitEffectData(`${titleCase(resolution.dragon)} Dragon Resistance`, [{ key: "system.traits.dr.value", value: type }], `systems/dnd5e/icons/svg/damage/${type}.svg`);
+    data.effects = [...collectionValues(data.effects ?? []), effect];
+    finalName = resolution.previewName || `${titleCase(resolution.dragon)} Dragon Scale Mail`;
+    data.name = finalName;
+    appendResolutionSummary(data, "Resolved Dragon Type", [`${titleCase(resolution.dragon)} dragon — ${titleCase(type)} resistance`]);
+  }
+
+  if (spec.kind === "prayer-beads") {
+    const activities = itemActivityData(data);
+    const kept = [];
+    const covered = new Set();
+    const legacyPrayer = reserved.packId === "dnd5e.items";
+    const dawnRecovery = [{ period: "dawn", type: "recoverAll" }];
+
+    if (legacyPrayer) {
+      // In the 2014 SRD document the two Curing activities intentionally share
+      // the Item uses pool, while the other bead types use activity-local uses.
+      // Preserve that model so one Curing bead cannot be spent once on Cure
+      // Wounds and again independently on Lesser Restoration.
+      const curingCount = Number(resolution.counts?.curing ?? 0);
+      data.system ??= {};
+      data.system.uses = {
+        ...(data.system.uses ?? {}),
+        spent: 0,
+        max: String(curingCount),
+        recovery: dawnRecovery
+      };
+    }
+
+    for (const activity of activities) {
+      const bead = beadTypeForActivity(activity, resolution);
+      const count = Number(resolution.counts?.[bead] ?? 0);
+      if (!bead || count <= 0) continue;
+      const copy = foundry.utils.deepClone(activity);
+      if (!(legacyPrayer && bead === "curing")) {
+        copy.uses = { ...(copy.uses ?? {}), spent: 0, max: String(count), recovery: dawnRecovery };
+      } else {
+        copy.uses = { ...(copy.uses ?? {}), spent: 0, max: "" };
+      }
+      if (!copy.name) copy.name = resolvedActivityName(bead);
+      kept.push(copy);
+      covered.add(bead);
+    }
+    const expected = Object.keys(resolution.counts ?? {}).filter(bead => resolution.counts[bead] > 0);
+    if (!kept.length || expected.some(bead => !covered.has(bead))) {
+      throw new Error(`EasyMagicItems could not map every prayer bead to an activity for ${reserved.name}.`);
+    }
+    setItemActivities(data, kept);
+    appendResolutionSummary(data, "Resolved Magic Beads", expected.map(bead => `${resolvedActivityName(bead)} ×${resolution.counts[bead]}`));
+  }
+
+  if (spec.kind === "robe-patches") {
+    const activities = itemActivityData(data);
+    const named = activities.filter(activity => String(activity?.name ?? "").trim());
+    const template = named.find(activity => activity.type === "utility") ?? activities.find(activity => activity.type === "utility") ?? null;
+    const baseNames = ["Bullseye Lantern", "Dagger", "Mirror", "Pole", "Rope (Coiled)", "Sack"];
+    const finalActivities = [];
+
+    if (named.length >= 6) {
+      for (const activity of named) {
+        const copy = foundry.utils.deepClone(activity);
+        copy.uses = { ...(copy.uses ?? {}), spent: 0, max: String(copy.uses?.max || 2) };
+        finalActivities.push(copy);
+      }
+    } else {
+      for (const name of baseNames) finalActivities.push(makeUtilityActivity(name, 2, template));
+    }
+
+    for (const [label, count] of Object.entries(resolution.counts ?? {})) {
+      finalActivities.push(makeUtilityActivity(label, count, template));
+    }
+    setItemActivities(data, finalActivities);
+    appendResolutionSummary(data, "Resolved Patches", [
+      ...baseNames.map(name => `${name} ×2`),
+      ...Object.entries(resolution.counts ?? {}).map(([label, count]) => `${label} ×${count}`)
+    ]);
+  }
+
+  if (spec.kind === "initial-quantity") {
+    const count = Number(resolution.count);
+    if (!Number.isFinite(count) || count < 1) throw new Error(`EasyMagicItems could not validate the starting quantity for ${reserved.name}.`);
+    data.system ??= {};
+    if (!data.system.uses || typeof data.system.uses !== "object" || Array.isArray(data.system.uses)) {
+      data.system.uses = { max: "", spent: 0, recovery: [] };
+    }
+    data.system.uses.max = String(count);
+    data.system.uses.spent = 0;
+    if (spec.removeActivity) {
+      const activities = itemActivityData(data).filter(activity => normalizeName(activity?.name) !== normalizeName(spec.removeActivity));
+      setItemActivities(data, activities);
+    }
+    appendResolutionSummary(data, "Resolved Starting Quantity", [`${count} ${resolution.unit ?? spec.unit ?? "uses"}`]);
+  }
+
+  if (spec.kind === "legacy-candle") {
+    const alignment = String(resolution.alignment ?? "").trim();
+    if (!alignment) throw new Error(`EasyMagicItems could not validate the alignment for ${reserved.name}.`);
+    finalName = resolution.previewName || `${reserved.name} (${alignment})`;
+    data.name = finalName;
+    appendResolutionSummary(data, "Resolved Invocation Alignment", [`Alignment: ${alignment}`]);
+  }
+
+  sanitizeDamageChangesInData(data);
+  resolution.status = "validated";
+  stampResolution(data, reserved, resolution, true);
+
+  const activities = itemActivityData(data);
+  if (spec.kind === "activity-table" && activities.length !== 1) throw new Error(`EasyMagicItems validation blocked unresolved activities on ${reserved.name}.`);
+  if (spec.kind === "effect-table" && collectionValues(data.effects ?? []).length !== 1) throw new Error(`EasyMagicItems validation blocked unresolved effects on ${reserved.name}.`);
+  if (["legacy-resistance", "legacy-vulnerability", "legacy-dragon-scale"].includes(spec.kind) && !collectionValues(data.effects ?? []).length) {
+    throw new Error(`EasyMagicItems validation blocked an unresolved trait on ${reserved.name}.`);
+  }
+  if (spec.kind === "initial-quantity" && Number(data.system?.uses?.max ?? 0) !== Number(resolution.count)) {
+    throw new Error(`EasyMagicItems validation blocked an unresolved starting quantity on ${reserved.name}.`);
+  }
+  if (spec.kind === "legacy-candle" && !String(resolution.alignment ?? "").trim()) {
+    throw new Error(`EasyMagicItems validation blocked an unresolved invocation alignment on ${reserved.name}.`);
+  }
+
+  return { data, resolution, name: data.name || finalName, img: data.img || reserved.img };
+}
+
+async function createItemForParticipant(session, tokenUuid, itemData, sourceUuid, options = {}) {
   if (!session.autoGrant || !itemData) return null;
+  assertGrantResolution(sourceUuid, options);
   const participant = session.participants.find(entry => entry.tokenUuid === tokenUuid);
   const actor = participant?.actorUuid ? await fromUuid(participant.actorUuid) : null;
   if (!actor || actor.documentName !== "Actor") throw new Error(i18n("EMI.Error.ActorLoad"));
   const data = foundry.utils.deepClone(itemData);
   delete data._id; delete data.folder; delete data.ownership; delete data._stats;
-  data.flags = foundry.utils.mergeObject(data.flags ?? {}, { [MODULE_ID]: { grantedBySession: session.id, sourceUuid, participantTokenUuid: tokenUuid } }, { inplace: false });
+  data.flags = foundry.utils.mergeObject(data.flags ?? {}, {
+    [MODULE_ID]: {
+      grantedBySession: session.id,
+      sourceUuid,
+      participantTokenUuid: tokenUuid,
+      ...(options.staging ? { stagingResolution: true } : {})
+    }
+  }, { inplace: false });
   const [created] = await actor.createEmbeddedDocuments("Item", [data], { keepId: false });
   return created ?? null;
 }
 
-async function grantItemToParticipant(session, tokenUuid, sourceDocument) {
-  return createItemForParticipant(session, tokenUuid, sourceDocument?.toObject(), sourceDocument?.uuid);
+async function grantItemToParticipant(session, tokenUuid, sourceDocument, options = {}) {
+  return createItemForParticipant(session, tokenUuid, sourceDocument?.toObject(), sourceDocument?.uuid, options);
+}
+
+function activityId(activity) {
+  return String(activity?._id ?? activity?.id ?? "");
+}
+
+function findSetupActivity(document, preferredId = "") {
+  const activities = getRawActivities(document);
+  if (preferredId) {
+    const preferred = activities.find(activity => activityId(activity) === preferredId);
+    if (preferred && isSetupEnchantActivityData(preferred)) return preferred;
+  }
+  return activities.find(isSetupEnchantActivityData) ?? null;
+}
+
+function profileEffect(document, profileId) {
+  return getRawEffects(document).find(effect => String(effect?._id ?? effect?.id ?? "") === String(profileId ?? "")) ?? null;
+}
+
+function previewMaterializedName(template, profileId, baseName) {
+  const effect = profileEffect(template, profileId);
+  const nameChange = effectChanges(effect).find(change => String(change?.key ?? "") === "name");
+  const value = String(nameChange?.value ?? "");
+  if (value.includes("{}")) return value.replaceAll("{}", baseName).trim();
+  if (value && String(nameChange?.type ?? "") === "add") return `${baseName}${value}`.trim();
+  if (effect?.name && !/^weapon\s*[+]|^armor\s*[+]|^shield\s*[+]|^ammunition\s*[+]/i.test(effect.name)) {
+    return `${effect.name} (${baseName})`;
+  }
+  return `${baseName} — ${effect?.name ?? template?.name ?? i18n("EMI.Common.UnnamedItem")}`;
+}
+
+function baseOptionLabel(category) {
+  if (category === "weapon" || category === "staff") return i18n("EMI.Common.Weapon", "Weapon");
+  if (category === "armor") return i18n("EMI.Common.Armor", "Armor");
+  if (category === "shield") return i18n("EMI.Common.Shield", "Shield");
+  if (category === "ammunition") return i18n("EMI.Common.Ammunition", "Ammunition");
+  return i18n("EMI.Common.ItemForm", "Item form");
 }
 
 async function finalizeReservedItem(session, tokenUuid) {
@@ -1393,7 +2738,7 @@ async function finalizeReservedItem(session, tokenUuid) {
     console.error(`${MODULE_ID} | Could not load the selected compendium item`, error);
   }
 
-  const pendingWeapon = selected.category === "weapon" && (isWeaponTemplateEntry(selected) || isWeaponTemplateDocument(sourceDocument));
+  const pendingTemplate = selected.materializationMode === "template" || isMagicItemTemplateDocument(sourceDocument);
   const scrollLevel = selected.category === "scroll" ? parseScrollLevel(selected) : null;
   const pendingScroll = scrollLevel !== null && scrollLevel !== undefined;
 
@@ -1402,85 +2747,264 @@ async function finalizeReservedItem(session, tokenUuid) {
   delete session.reserved[tokenUuid];
   session.results ??= {};
 
-  if (pendingWeapon || pendingScroll) {
-    const compatible = pendingWeapon ? compatibleBaseWeapons(sourceDocument, catalogCache?.baseWeapons ?? []) : [];
+  if (pendingTemplate || pendingScroll) {
+    const compatible = pendingTemplate
+      ? compatibleBaseItems(sourceDocument ?? selected, catalogCache?.baseItems ?? [], { fallback: true })
+      : [];
+    if (pendingTemplate && !compatible.length) {
+      throw new Error(i18nFormat("EMI.Error.NoCompatibleBaseItem", { item: selected.name }, `No compatible base item was found for ${selected.name}.`));
+    }
     session.results[tokenUuid] = {
-      uuid: selected.uuid, name: selected.name, img: selected.img, rarity: selected.rarity,
-      rarityLabel: selected.rarityLabel, category: selected.category, categoryLabel: selected.categoryLabel,
-      requiresAttunement: selected.requiresAttunement, packLabel: selected.packLabel,
-      pendingFinal: true, finalKind: pendingWeapon ? "weapon" : "scroll", scrollLevel,
-      weaponOptions: compatible.map(w => ({ value: w.uuid, label: w.name }))
+      uuid: selected.uuid,
+      sourceName: selected.name,
+      name: selected.selectedProfileName || selected.name,
+      img: selected.img,
+      rarity: selected.rarity,
+      rarityLabel: rarityLabel(selected.rarity),
+      category: selected.category,
+      categoryLabel: categoryLabel(selected.category),
+      requiresAttunement: selected.requiresAttunement,
+      packLabel: selected.packLabel,
+      pendingFinal: true,
+      finalKind: pendingTemplate ? "template" : "scroll",
+      scrollLevel,
+      setupActivityId: selected.setupActivityId || activityId(findSetupActivity(sourceDocument)),
+      selectedProfileId: selected.selectedProfileId || null,
+      selectedProfileName: selected.selectedProfileName || null,
+      selectedProfileRiders: foundry.utils.deepClone(selected.selectedProfileRiders ?? {}),
+      selectedProfileSemantics: foundry.utils.deepClone(selected.selectedProfileSemantics ?? []),
+      resolutionSpec: foundry.utils.deepClone(selected.resolutionSpec ?? null),
+      resolution: foundry.utils.deepClone(selected.resolution ?? null),
+      baseCategory: selected.category,
+      baseLabel: baseOptionLabel(selected.category),
+      baseOptions: compatible.map(base => ({ value: base.uuid, label: base.name })),
+      // Legacy aliases retained so an in-progress 1.0.x session can still render.
+      weaponOptions: selected.category === "weapon" ? compatible.map(base => ({ value: base.uuid, label: base.name })) : null
     };
     return selected;
   }
 
   let granted = null; let grantFailed = false;
-  try { granted = await grantItemToParticipant(session, tokenUuid, sourceDocument); }
-  catch (error) { grantFailed = Boolean(session.autoGrant); console.error(`${MODULE_ID} | Inventory delivery failed`, error); }
+  let ready = null;
+  try {
+    if (selected.resolutionRequired) {
+      ready = await resolveReadyItemData(sourceDocument, selected);
+      granted = await createItemForParticipant(session, tokenUuid, ready.data, selected.uuid, { resolutionComplete: true });
+    } else {
+      granted = await grantItemToParticipant(session, tokenUuid, sourceDocument, { resolutionComplete: true });
+    }
+  } catch (error) {
+    grantFailed = Boolean(session.autoGrant);
+    console.error(`${MODULE_ID} | Inventory delivery failed`, error);
+    if (selected.resolutionRequired) throw error;
+  }
   session.results[tokenUuid] = {
     uuid: selected.uuid, grantedUuid: granted?.uuid ?? null, grantFailed,
-    name: selected.name, img: selected.img, rarity: selected.rarity, rarityLabel: selected.rarityLabel,
-    category: selected.category, categoryLabel: selected.categoryLabel,
-    requiresAttunement: selected.requiresAttunement, packLabel: selected.packLabel
+    name: ready?.name ?? selected.name, img: ready?.img ?? selected.img, rarity: selected.rarity, rarityLabel: rarityLabel(selected.rarity),
+    category: selected.category, categoryLabel: categoryLabel(selected.category),
+    requiresAttunement: selected.requiresAttunement, packLabel: selected.packLabel,
+    resolution: foundry.utils.deepClone(ready?.resolution ?? selected.resolution ?? null)
   };
   return selected;
 }
 
-async function materializeWeapon(session, tokenUuid, result) {
+function compatibleBaseForResult(result, template) {
+  return compatibleBaseItems(template, catalogCache?.baseItems ?? [], { fallback: true });
+}
+
+async function createLegacyEnchantment(template, profileId, created) {
+  const effect = profileEffect(template, profileId);
+  if (!effect) throw new Error(i18n("EMI.Error.EnchantmentProfileMissing", "The selected enchantment profile could not be found."));
+  const effectData = effect.toObject ? effect.toObject() : foundry.utils.deepClone(effect);
+  delete effectData._id;
+  effectData.disabled = false;
+  effectData.transfer = true;
+  effectData.origin = template.uuid;
+  foundry.utils.setProperty(effectData, "flags.dnd5e.enchantmentProfile", profileId);
+  const [enchantment] = await created.createEmbeddedDocuments("ActiveEffect", [effectData]);
+  return enchantment;
+}
+
+async function materializeEnchantmentRiders(enchantment, activity, profileId) {
+  if (!enchantment) return false;
+  const options = { dnd5e: { enchantmentProfile: profileId, activityId: activityId(activity) } };
+  if (typeof enchantment.system?.collectRiders === "function" && typeof foundry.documents?.modifyBatch === "function") {
+    const batch = await enchantment.system.collectRiders(options);
+    if (batch?.length) await foundry.documents.modifyBatch(batch);
+    return true;
+  }
+  if (typeof enchantment.createRiderEnchantments === "function") {
+    await enchantment.createRiderEnchantments(options);
+    return true;
+  }
+  return false;
+}
+
+
+async function sanitizeCreatedItemDamageChanges(item) {
+  if (!item?.effects) return;
+  for (const effect of item.effects) {
+    const changes = collectionValues(effect?.system?.changes ?? effect?.changes ?? []);
+    let dirty = false;
+    const next = changes.map(change => {
+      const copy = foundry.utils.deepClone(change);
+      if (["system.traits.dr.value", "system.traits.dv.value", "system.traits.di.value"].includes(String(copy?.key ?? ""))) {
+        const canonical = normalizeDamageType(copy?.value);
+        if (canonical && canonical !== copy.value) {
+          copy.value = canonical;
+          dirty = true;
+        }
+      }
+      return copy;
+    });
+    if (!dirty) continue;
+    try {
+      if (effect.system?.changes !== undefined) await effect.update({ "system.changes": next });
+      else await effect.update({ changes: next });
+    } catch (error) {
+      console.warn(`${MODULE_ID} | Could not sanitize damage-type spelling on ${effect.name}`, error);
+    }
+  }
+}
+
+function createdItemSemanticTokens(item) {
+  const tokens = new Set(semanticTokensFromText(item?.name ?? ""));
+  const effects = collectionValues(item?.effects ?? []);
+  for (const effect of effects) {
+    for (const token of semanticTokensFromEffect(effect, effects)) tokens.add(token);
+  }
+  for (const activity of collectionValues(item?.system?.activities ?? [])) {
+    for (const token of activitySemanticTokens(activity)) tokens.add(token);
+  }
+  return [...tokens];
+}
+
+function validateCreatedProfileSemantics(created, expected = []) {
+  const meaningful = (expected ?? []).filter(token => /^(?:damage|creature|dragon|bonus):/.test(token));
+  if (!meaningful.length) return true;
+  const actual = new Set(createdItemSemanticTokens(created));
+  return meaningful.some(token => actual.has(token));
+}
+
+async function markCreatedResolutionComplete(created, result, profileId, base) {
+  if (!created) return;
+  const resolution = foundry.utils.deepClone(result?.resolution ?? {
+    kind: result?.resolutionSpec?.kind ?? "template",
+    selectedProfileId: profileId,
+    selectedProfileName: result?.selectedProfileName ?? null
+  });
+  resolution.status = "validated";
+  resolution.selectedProfileId = profileId;
+  resolution.baseUuid = base?.uuid ?? null;
+  resolution.baseName = base?.name ?? null;
+  await created.update({
+    [`flags.${MODULE_ID}.stagingResolution`]: false,
+    [`flags.${MODULE_ID}.resolution`]: {
+      required: true,
+      complete: true,
+      kind: resolution.kind ?? "template",
+      sourceUuid: result?.uuid ?? null,
+      choice: resolution
+    }
+  });
+}
+
+function enchantmentErrorMessage(errors, template, base) {
+  const list = Array.isArray(errors) ? errors : [];
+  const message = list.map(error => error?.message ?? String(error ?? "")).filter(Boolean).join("; ");
+  return message || i18nFormat("EMI.Error.ItemIncompatible", { template: template?.name, base: base?.name }, `${template?.name} is not compatible with ${base?.name}.`);
+}
+
+async function materializeMagicItem(session, tokenUuid, result) {
   const template = await fromUuid(result.uuid);
-  const allBaseWeapons = catalogCache?.baseWeapons ?? [];
-  let compatible = compatibleBaseWeapons(template, allBaseWeapons);
+  if (!template) throw new Error(i18n("EMI.Error.ItemSheetLoad"));
+  const activity = findSetupActivity(template, result.setupActivityId);
+  if (!activity) throw new Error(i18n("EMI.Error.EnchantmentActivityMissing", "The setup enchantment activity could not be found."));
+
+  const profiles = buildEnchantmentProfiles(template, activity);
+  const profileId = result.selectedProfileId;
+  if (!profileId || !profiles.some(profile => profile.id === profileId)) {
+    throw new Error(i18n("EMI.Error.EnchantmentProfileMissing", "The reserved enchantment profile could not be found. Delivery was blocked instead of choosing a new variant at grant time."));
+  }
+
   const preference = finalPreference(session, tokenUuid);
-  if (preference.allowedWeaponBases?.length) compatible = compatible.filter(weapon => preference.allowedWeaponBases.includes(weapon.uuid));
-  const explicitWeapon = preference.weaponBase && preference.weaponBase !== "random";
-  let base = explicitWeapon
-    ? allBaseWeapons.find(w => w.uuid === preference.weaponBase)
-    : weightedChoice(compatible, weapon => {
+  let compatible = compatibleBaseForResult(result, template);
+  if (result.category === "weapon" && preference.allowedWeaponBases?.length) {
+    compatible = compatible.filter(base => preference.allowedWeaponBases.includes(base.uuid));
+  }
+
+  const preferredBaseUuid = preference.itemBase && preference.itemBase !== "random"
+    ? preference.itemBase
+    : (result.category === "weapon" && preference.weaponBase && preference.weaponBase !== "random" ? preference.weaponBase : null);
+
+  let base = preferredBaseUuid ? (catalogCache?.baseItems ?? []).find(item => item.uuid === preferredBaseUuid) : null;
+  if (base && !compatible.some(candidate => candidate.uuid === base.uuid)) {
+    throw new Error(i18nFormat("EMI.Error.ItemIncompatible", { template: template.name, base: base.name }, `${template.name} is not compatible with ${base.name}.`));
+  }
+  if (!base) {
+    if (result.category === "weapon") {
+      base = weightedChoice(compatible, weapon => {
         if (preference.preferredWeaponBases?.includes(weapon.uuid)) return 6;
         return preferredWeaponWeight(weapon, preference.recommendationProfile);
       });
-  if (!base) throw new Error(explicitWeapon ? i18n("EMI.Error.SelectedWeaponNotFound") : i18n("EMI.Error.NoCompatibleBaseWeapon"));
-
-  // A specific GM selection is authoritative. It was already used to filter
-  // the first-stage pool, so never silently replace it with a random weapon.
-  if (explicitWeapon && !itemAllowsSelectedWeapon({
-    category: "weapon",
-    enchantmentTemplate: true,
-    baseItem: String(getValue(template, "system.type.baseItem", "")),
-    description: String(getValue(template, "system.description.value", ""))
-  }, base.uuid)) {
-    throw new Error(i18nFormat("EMI.Error.WeaponIncompatible", { template: template.name, base: base.name }));
+    } else base = randomChoice(compatible);
   }
+  if (!base) throw new Error(i18nFormat("EMI.Error.NoCompatibleBaseItem", { item: template.name }, `No compatible base item was found for ${template.name}.`));
+
   const baseDocument = await fromUuid(base.uuid);
-  const data = baseDocument.toObject();
-  delete data._id;
+  if (!baseDocument) throw new Error(i18n("EMI.Error.BaseItemLoad", "The selected base item could not be loaded."));
+  const previewName = previewMaterializedName(template, profileId, base.name);
 
-  // Copy rider activities and non-enchantment effects from the official template.
-  const templateActivities = foundry.utils.deepClone(getValue(template, "system.activities", {}));
-  const riderActivities = Object.fromEntries(Object.entries(templateActivities).filter(([, activity]) => activity.type !== "enchant"));
-  data.system.activities = foundry.utils.mergeObject(data.system.activities ?? {}, riderActivities, { inplace: false, insertKeys: true, overwrite: true });
-  const nonEnchantEffects = [...template.effects].filter(e => e.type !== "enchantment").map(e => { const d=e.toObject(); delete d._id; d.disabled=false; d.origin=template.uuid; return d; });
-  data.effects = [...(data.effects ?? []), ...nonEnchantEffects];
-
-  const created = await createItemForParticipant(session, tokenUuid, data, template.uuid);
+  const created = await createItemForParticipant(session, tokenUuid, baseDocument.toObject(), template.uuid, { staging: true });
   if (!created) {
-    // Without inventory delivery there is no parent document on which Foundry can
-    // safely materialize enchantments. Keep a readable final result and source link.
-    return { uuid: template.uuid, grantedUuid: null, name: `${template.name} ${base.name}`, img: template.img || base.img };
+    return { uuid: template.uuid, grantedUuid: null, name: previewName, img: template.img || base.img };
   }
+
   try {
-    const effectData = getEnchantmentEffects(template).map(effect => {
-      const data = effect.toObject();
-      delete data._id;
-      data.disabled = false;
-      data.origin = template.uuid;
-      return data;
-    });
-    if (effectData.length) await created.createEmbeddedDocuments("ActiveEffect", effectData);
-    return { uuid: template.uuid, grantedUuid: created.uuid, name: created.name, img: created.img };
+    let enchantment = null;
+    if (typeof activity.canEnchant === "function") {
+      const validation = activity.canEnchant(created);
+      if (Array.isArray(validation) && validation.length) throw new Error(enchantmentErrorMessage(validation, template, base));
+    }
+
+    if (typeof activity.applyEnchantment === "function") {
+      enchantment = await activity.applyEnchantment(profileId, created, { strict: false });
+      if (!enchantment) throw new Error(i18n("EMI.Error.EnchantmentApplyFailed", "D&D5e did not apply the selected enchantment."));
+    } else {
+      enchantment = await createLegacyEnchantment(template, profileId, created);
+    }
+
+    const ridersHandled = await materializeEnchantmentRiders(enchantment, activity, profileId);
+    const selectedProfile = profiles.find(profile => profile.id === profileId);
+    const hasRiders = Object.values(selectedProfile?.riders ?? {}).some(entries => collectionValues(entries).length);
+    if (hasRiders && !ridersHandled) {
+      console.warn(`${MODULE_ID} | The selected enchantment has riders, but this D&D5e version exposes no rider materialization API.`);
+    }
+
+    const appliedProfile = enchantment?.flags?.dnd5e?.enchantmentProfile
+      ?? getValue(enchantment, "flags.dnd5e.enchantmentProfile", null);
+    if (appliedProfile && appliedProfile !== profileId) {
+      throw new Error(i18n("EMI.Error.EnchantmentValidationFailed", "The created item received a different enchantment profile than requested."));
+    }
+
+    await sanitizeCreatedItemDamageChanges(created);
+    if (!validateCreatedProfileSemantics(created, result.selectedProfileSemantics ?? selectedProfile?.primarySemantics ?? [])) {
+      throw new Error(i18n("EMI.Error.EnchantmentValidationFailed", "The created item does not match the reserved enchantment variant."));
+    }
+    await markCreatedResolutionComplete(created, result, profileId, base);
+
+    return {
+      uuid: template.uuid,
+      grantedUuid: created.uuid,
+      name: created.name || previewName,
+      img: created.img || template.img || base.img,
+      selectedProfileId: profileId,
+      baseUuid: base.uuid,
+      baseName: base.name
+    };
   } catch (error) {
     try { await created.delete(); } catch (cleanupError) {
-      console.warn(`${MODULE_ID} | Could not clean up a partially created weapon`, cleanupError);
+      console.warn(`${MODULE_ID} | Could not clean up a partially materialized magic item`, cleanupError);
     }
     throw error;
   }
@@ -1494,17 +3018,19 @@ async function materializeScroll(session, tokenUuid, result) {
   const spellDocument = await fromUuid(spell.uuid);
   let scrollData = null;
   const Item5e = globalThis.dnd5e?.documents?.Item5e;
-  if (Item5e?.createScrollFromSpell) {
-    // The system helper can display its own Create Scroll dialog. Suppress that
-    // prompt for this automated workflow, and serialize calls as a defensive
-    // fallback so rapid clicks can never stack system dialogs behind the draw UI.
+  if (Item5e?.createScrollFromCompendiumSpell && String(spell.uuid).startsWith("Compendium.")) {
+    try {
+      const generated = await Item5e.createScrollFromCompendiumSpell(spell.uuid, { dialog: false, level: result.scrollLevel });
+      scrollData = generated?.toObject ? generated.toObject() : generated;
+    } catch (error) {
+      console.warn(`${MODULE_ID} | createScrollFromCompendiumSpell failed; falling back to createScrollFromSpell.`, error);
+    }
+  }
+  if (!scrollData && Item5e?.createScrollFromSpell) {
     const createScroll = async () => Item5e.createScrollFromSpell(
       spellDocument,
       {},
-      {
-        dialog: false,
-        level: result.scrollLevel
-      }
+      { dialog: false, level: result.scrollLevel }
     );
     const queued = scrollCreationQueue.then(createScroll, createScroll);
     scrollCreationQueue = queued.catch(() => undefined);
@@ -1516,7 +3042,11 @@ async function materializeScroll(session, tokenUuid, result) {
     scrollData = template.toObject();
     scrollData.name = i18nFormat("EMI.Common.SpellScrollOf", { spell: spellDocument.name });
     scrollData.img = spellDocument.img || template.img;
-    scrollData.system.description.value = `<h2>${escapeHtml(spellDocument.name)}</h2>${getValue(spellDocument, "system.description.value", "")}`;
+    foundry.utils.setProperty(
+      scrollData,
+      "system.description.value",
+      `<h2>${escapeHtml(spellDocument.name)}</h2>${getValue(spellDocument, "system.description.value", "")}`
+    );
   }
   const created = await createItemForParticipant(session, tokenUuid, scrollData, spellDocument.uuid);
   return { uuid: spellDocument.uuid, grantedUuid: created?.uuid ?? null, name: created?.name ?? scrollData.name ?? i18nFormat("EMI.Common.SpellScrollOf", { spell: spell.name }), img: created?.img ?? scrollData.img ?? spell.img };
@@ -1525,8 +3055,17 @@ async function materializeScroll(session, tokenUuid, result) {
 async function finalizeTemplateResult(session, tokenUuid) {
   const result = session.results?.[tokenUuid];
   if (!result?.pendingFinal) return;
-  const final = result.finalKind === "weapon" ? await materializeWeapon(session, tokenUuid, result) : await materializeScroll(session, tokenUuid, result);
-  Object.assign(result, final, { pendingFinal: false, finalizedFromUuid: result.uuid, finalKind: null, weaponOptions: null, grantFailed: Boolean(session.autoGrant && !final.grantedUuid) });
+  const final = result.finalKind === "scroll"
+    ? await materializeScroll(session, tokenUuid, result)
+    : await materializeMagicItem(session, tokenUuid, result);
+  Object.assign(result, final, {
+    pendingFinal: false,
+    finalizedFromUuid: result.uuid,
+    finalKind: null,
+    baseOptions: null,
+    weaponOptions: null,
+    grantFailed: Boolean(session.autoGrant && !final.grantedUuid)
+  });
 }
 
 async function handleAsGM(payload) {
@@ -1558,7 +3097,7 @@ async function handleAsGM(payload) {
   }
 
   if (payload.action !== "draw" || session.results?.[payload.tokenUuid] || (session.revealing ?? []).includes(payload.tokenUuid)) return;
-  const reserved = reserveRandomItem(session, payload.tokenUuid);
+  const reserved = await reserveRandomItem(session, payload.tokenUuid);
   if (!reserved) return ui.notifications.warn(i18n("EMI.Error.NoUnseenItem"));
   session.revealing ??= [];
   session.revealing.push(payload.tokenUuid);
@@ -1788,7 +3327,7 @@ async function previewRecommendedItems(actor, filters = null) {
       <img src="${escapeHtml(item.img)}" alt="">
       <div class="emi-recommendation-main">
         <div class="emi-recommendation-title"><b>${escapeHtml(item.name)}</b><span>${evaluation.score}</span></div>
-        <small>${escapeHtml(rarityLabel(item.rarity))} · ${escapeHtml(categoryLabel(item.category))}</small>
+        <small>${escapeHtml(displayRarityLabel(item, activeFilters))} · ${escapeHtml(categoryLabel(item.category))}</small>
         <p>${escapeHtml(reasons.join(" • ") || i18n("EMI.Recommendation.CompatiblePreset"))}</p>
       </div>
       <button type="button" data-emi-open-recommendation="${escapeHtml(item.uuid)}" title="${escapeHtml(i18n("EMI.Common.OpenItemSheet"))}"><i class="fa-solid fa-book-open"></i></button>
@@ -2441,7 +3980,7 @@ Hooks.once("ready", async () => {
   game.socket.on(SOCKET_NAME, onSocket);
   const module = game.modules.get(MODULE_ID);
   const api = {
-    version: module?.version ?? "1.0.2",
+    version: module?.version ?? "1.1.0-test2",
     start: startDraw,
     open: startDraw,
     openConfiguration: openModuleConfiguration,

@@ -202,5 +202,18 @@
   "EMI.Settings.RestoreDefaults": "Restore defaults",
   "EMI.Settings.RestoreDefaultsHint": "Reset the controls in this window to their default values. Nothing is saved until you click Save Settings.",
   "EMI.Error.DialogUnavailable": "EasyMagicItems could not open its settings window on this Foundry version.",
-  "EMI.Settings.MasterAudioOff": "Master audio off"
+  "EMI.Settings.MasterAudioOff": "Master audio off",
+  "EMI.Common.Armor": "Armor",
+  "EMI.Common.Shield": "Shield",
+  "EMI.Common.Ammunition": "Ammunition",
+  "EMI.Common.ItemForm": "Item form",
+  "EMI.Main.RollItemForm": "Roll Item Form",
+  "EMI.Filter.RandomCompatibleItem": "Random compatible form",
+  "EMI.Error.NoCompatibleBaseItem": "No compatible base item was found for {item}.",
+  "EMI.Error.ItemIncompatible": "{template} is not compatible with {base}. Choose another form or reroll the magic item.",
+  "EMI.Error.EnchantmentProfileMissing": "The selected enchantment profile could not be found.",
+  "EMI.Error.EnchantmentActivityMissing": "The setup enchantment activity could not be found.",
+  "EMI.Error.EnchantmentApplyFailed": "D&D5e did not apply the selected enchantment.",
+  "EMI.Error.EnchantmentValidationFailed": "The created item received a different enchantment profile than requested.",
+  "EMI.Error.BaseItemLoad": "The selected base item could not be loaded."
 }

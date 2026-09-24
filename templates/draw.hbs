@@ -96,11 +96,11 @@
           <div class="emi-gm-person"><img src="{{portrait}}"><span><b>{{name}}</b><small>{{poolRemaining}} {{@root.labels.available}}</small></span></div>
           {{#if result.pendingFinal}}
             <div class="emi-final-options">
-              {{#if finalKindWeapon}}
-                <label>{{@root.labels.weapon}}
-                  <select data-final-override="weaponBase" data-token-uuid="{{tokenUuid}}">
-                    <option value="random">{{@root.labels.randomWeapon}}</option>
-                    {{#each weaponOptions}}<option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
+              {{#if finalKindTemplate}}
+                <label>{{baseLabel}}
+                  <select data-final-override="itemBase" data-token-uuid="{{tokenUuid}}">
+                    <option value="random">{{@root.labels.randomBase}}</option>
+                    {{#each baseOptions}}<option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
                   </select>
                 </label>
               {{/if}}

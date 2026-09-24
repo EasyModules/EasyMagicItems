@@ -13,17 +13,17 @@ Each participating character receives a personalized item pool based on class, l
 - Character-aware recommendations focused on items that are useful for each character.
 - Fully configurable item pools for guided or completely random rewards.
 - Independent reveal control for each player.
-- Automatic handling of compatible weapon forms and spell scrolls.
+- Automatic handling of compatible magic-item forms (weapons, armor, shields, ammunition, and other official templates) and spell scrolls.
 - Optional automatic delivery to character inventories.
 - Optional chat summaries and cinematic audio.
 - Separate controls for all audio and for the opening theme alone.
-- Required integration with the EasyModules Hub.
+- Optional integration with the EasyModules Hub.
 
 ## Requirements
 
 - Foundry Virtual Tabletop v13 through v14.
-- D&D 5e system 5.3.0 or newer.
-- EasyModules Hub 1.0.6 or newer (required).
+- D&D 5e system 5.3.0 or newer. A D&D 5e 6.x compatibility path is included and requires the Foundry version required by that system release; it remains pending functional regression validation.
+- EasyModules Hub 1.0.8 or newer (optional).
 - Compatible D&D 5e compendiums installed and enabled.
 
 EasyMagicItems reads items, artwork, portraits, and game data from the user's installed compendiums at runtime. No D&D game content is bundled with the module.
@@ -38,7 +38,7 @@ https://github.com/EasyModules/EasyMagicItems/releases/latest/download/module.js
 
 After installation:
 
-1. Enable EasyModules Hub and EasyMagicItems in the world.
+1. Enable EasyMagicItems in the world. EasyModules Hub is optional and adds centralized access when enabled.
 2. Select one to six player-character tokens.
 3. Launch EasyMagicItems from the EasyModules Hub or its provided macro entry point.
 4. Review the item pools and begin the draw.
@@ -55,11 +55,23 @@ World settings are shared by the table. Audio preferences are stored locally for
 
 ## Compatibility and Maintenance
 
-EasyMagicItems supports Foundry VTT v13 through v14.364. The v14.364 build is the verified release target; v13 support is provided through the same public APIs and guarded compatibility paths.
+EasyMagicItems supports the existing D&D 5e 5.3.x path and includes capability-based compatibility for D&D 5e 6.x. D&D 5e 6.0.3 itself requires Foundry v14.367 or newer. The manifest keeps D&D 5e 5.3.3 as verified until the runtime regression suite is completed in a clean 6.0.3 world.
 
-EasyMagicItems isolates its most update-sensitive integrations, including compendium indexing, D&D 5e spell-scroll creation, weapon enchantment materialization, Foundry sockets, and application rendering.
+EasyMagicItems isolates its most update-sensitive integrations, including compendium indexing, rarity schema differences, D&D 5e Spell List Registry discovery, spell-scroll creation, official Enchant activities/profiles/riders, Foundry sockets, and application rendering.
+
+Version 1.1.0 enforces an item-resolution invariant: variants such as resistance type, enchantment profile, creature target, carpet size, golem type, prayer beads, robe patches, and starting treasure quantities are resolved before an item can be added to an Actor. Items whose mandatory found-state cannot yet be represented safely are excluded from the draw pool rather than delivered incomplete.
 
 See `COMPATIBILITY.md` for the full compatibility assessment and regression checklist.
+
+## D&D 5e 6.x diagnostic probe
+
+Version 1.1.0 includes a read-only diagnostic probe at `tools/dnd6-probe.mjs`. In a temporary Foundry Script macro, run:
+
+```js
+await import(`/modules/easy-magic-items/tools/dnd6-probe.mjs?${Date.now()}`);
+```
+
+The probe rebuilds indexes and checks template/profile discovery, the D&D 5e Spell List Registry, the official PHB registration path, scroll helpers, EnchantActivity methods, and the D&D 5e 6 rider API. It does not create, update, or delete actor items. Runtime item creation still needs the regression tests in `TESTING-DND6.md`.
 
 ## Support
 
